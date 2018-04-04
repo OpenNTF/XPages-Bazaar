@@ -16,7 +16,6 @@
 package com.ibm.xsp.extlib.javacompiler.impl;
 
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -24,10 +23,14 @@ import java.net.JarURLConnection;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Dictionary;
 import java.util.Enumeration;
 import java.util.HashMap;
@@ -319,62 +322,60 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 			return javaFiles;
 		}
 	}
+	
+	private List<JavaFileObjectClass> classPathClasses;
 
-	private void listPackage(List<JavaFileObject> list, String packageName) throws IOException {
-		String packagePath=StringUtil.replace(packageName, '.', '/');
-		if(resolvedClassPath!=null) {
-			for(int i=0; i<resolvedClassPath.length; i++) {
-				String path = resolvedClassPath[i];
-				if(path.startsWith("jar:")) {
-					URL url = new URL(path+"!/"+packagePath);
-					listPackageFromJarFile(list, packageName, url);
-				} else {
-					URL url = new URL(path+"/"+packagePath);
-					File directory = new File(url.getFile());
-					listPackageFromDirectory(list, packageName, directory);
-				}
-			}
-		}
-	}
-
-	private void listPackageFromDirectory(List<JavaFileObject> list, String packageName, File directory) throws IOException {
-		File[] files=directory.listFiles();
-		if(files!=null) {
-			for(int i=0; i<files.length; i++) {
-				File file = files[i];
-				if(file.isFile()) {
-					String cName=file.getName();
-					if(cName.endsWith(JavaSourceClassLoader.CLASS_EXTENSION)) {
-						String binaryName=packageName+"."+removeClassExtension(cName);
-						list.add(new JavaFileObjectClass(file.toURI(), binaryName));
+	private synchronized void listPackage(List<JavaFileObject> list, String packageName) throws IOException {
+		if(classPathClasses == null) {
+			classPathClasses =new ArrayList<>();
+			if(resolvedClassPath!=null) {
+				for(int i=0; i<resolvedClassPath.length; i++) {
+					String path = resolvedClassPath[i];
+					if(path.startsWith("jar:")) {
+						URL url = new URL(path + "!/");
+						listJarFile(classPathClasses, url);
+					} else {
+						Path directory = Paths.get(path);
+						listDirectory(classPathClasses, directory);
 					}
 				}
 			}
 		}
+		classPathClasses.stream()
+			.filter(o -> o.binaryName().startsWith(packageName) && o.binaryName().indexOf('.', packageName.length()+1) == -1)
+			.forEach(list::add);
 	}
 
-	private void listPackageFromJarFile(List<JavaFileObject> list, String packageName, URL url) throws IOException {
-		try {
-			String sUrl=url.toExternalForm();
-			String jarPrefix=sUrl.substring(0,sUrl.lastIndexOf("!/")+2);
+	private void listDirectory(List<JavaFileObjectClass> list, Path directory) throws IOException {
+		Files.find(directory, Integer.MAX_VALUE,
+			(file, attr) -> 
+				attr.isRegularFile() && file.getFileName().toString().endsWith(JavaSourceClassLoader.CLASS_EXTENSION)
+			)
+			.map(path -> {
+				String binaryName = removeClassExtension(path.toString()).replace(File.separatorChar, '.');
+				return new JavaFileObjectClass(path.toUri(), binaryName);
+			})
+			.forEach(list::add);
+	}
 
-			JarURLConnection jarConn=(JarURLConnection) url.openConnection();
-			String rootEntryName=jarConn.getEntryName();
-			int rootEnd=rootEntryName.length()+1;
-
-			for( Enumeration<JarEntry> e=jarConn.getJarFile().entries(); e.hasMoreElements(); ) {
-				JarEntry entry=e.nextElement();
-				String name=entry.getName();
-				if(name.startsWith(rootEntryName) && name.indexOf('/',rootEnd)<0 && name.endsWith(JavaSourceClassLoader.CLASS_EXTENSION)) {
-					String binaryName=removeClassExtension(StringUtil.replace(name,'/', '.'));
-					URI uri = new URI(jarPrefix+name);
-					list.add(new JavaFileObjectClass(uri, binaryName));
-				}
-			}
-		} catch (URISyntaxException e) {
-			throw new IOException(StringUtil.format("Not able to open uri {0} as a jar file", url), e);
-		} catch (FileNotFoundException e) {
-			// The jar doesn't exists with this path, ignore....
+	private void listJarFile(List<JavaFileObjectClass> list, URL url) throws IOException {
+		// The jar file may not contain an entry for the package folder explicitly (e.g. Notes.jar),
+		//   so look for entries starting with it
+		JarURLConnection jarConn = (JarURLConnection)url.openConnection();
+		try(JarFile jarFile = jarConn.getJarFile()) {
+			Collections.list(jarFile.entries()).stream()
+				.map(JarEntry::getName)
+				.filter(name -> name.endsWith(JavaSourceClassLoader.CLASS_EXTENSION))
+				.map(name -> {
+					try {
+						URI uri = new URI(url + name);
+						String binaryName = removeClassExtension(StringUtil.replace(name, '/' , '.'));
+						return new JavaFileObjectClass(uri, binaryName);
+					} catch (URISyntaxException e) {
+						throw new RuntimeException("Exception while extracting class name from jar", e);
+					}
+				})
+				.forEach(list::add);
 		}
 	}
 	
