@@ -16,7 +16,6 @@
 package com.ibm.xsp.extlib.javacompiler.impl;
 
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -24,10 +23,15 @@ import java.net.JarURLConnection;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Dictionary;
 import java.util.Enumeration;
 import java.util.HashMap;
@@ -47,7 +51,9 @@ import javax.tools.StandardLocation;
 
 import org.eclipse.core.runtime.FileLocator;
 import org.eclipse.core.runtime.Platform;
+import org.eclipse.osgi.util.ManifestElement;
 import org.osgi.framework.Bundle;
+import org.osgi.framework.BundleException;
 
 import com.ibm.commons.util.StringUtil;
 import com.ibm.commons.util.io.StreamUtil;
@@ -63,7 +69,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 	private JavaSourceClassLoader classLoader;
 	private Map<URI, JavaFileObjectJavaSource> fileObjects=new HashMap<URI, JavaFileObjectJavaSource>();
 	
-	private String[] resolvedClassPath;
+	private Collection<String> resolvedClassPath;
 
 	public SourceFileManager(JavaFileManager fileManager, JavaSourceClassLoader classLoader, String[] classPath, boolean resolve) {
 		super(fileManager);
@@ -71,43 +77,49 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 		if(resolve) {
 			resolvedClassPath = resolveClasspath(classPath);
 		} else {
-			resolvedClassPath = classPath;
+			resolvedClassPath = Arrays.asList(classPath);
 		}
 	}
 	
-	public static String[] resolveClasspath(final String[] classPath) {
-		return AccessController.doPrivileged(new PrivilegedAction<String[]>() {
-			public String[] run() {
+	public static Collection<String> resolveClasspath(final String[] classPath) {
+		Set<String> resolvedBundles = new HashSet<>();
+		return AccessController.doPrivileged((PrivilegedAction<Collection<String>>)() -> {
 				try {
 					if(classPath!=null) {
-						ArrayList<String> resolved = new ArrayList<String>();
-						for(int i=0; i<classPath.length; i++) {
-							String cp = classPath[i];
+						List<String> resolved = new ArrayList<String>();
+						for(String cp : classPath) {
 							// Known protocols
 							if(cp.startsWith("file:") || cp.startsWith("jar:")) {
 								resolved.add(cp);
 							} else {
 								// Resolve a simple bundle to its URL
-								resolveBundle(resolved,cp);
+								resolveBundle(resolved, resolvedBundles, cp);
 							}
 						}
 						if(resolved.size()>0) {
-							return resolved.toArray(new String[resolved.size()]);
+							return resolved;
 						}
 					}
-				} catch(IOException ex) {
+				} catch(IOException | BundleException ex) {
 					ex.printStackTrace();
 				}
-				return StringUtil.EMPTY_STRING_ARRAY;
-			}
+				return Collections.emptyList();
 		});
 	}
-	private static void resolveBundle(ArrayList<String> resolved, String bundleName) throws IOException {
+	private static void resolveBundle(Collection<String> resolved, Set<String> resolvedBundles, String bundleName) throws IOException, BundleException {
+		if(resolvedBundles.contains(bundleName)) {
+			return;
+		}
+		
 		Bundle b = org.eclipse.core.runtime.Platform.getBundle(bundleName);
-		resolveBundle(resolved, b, true);
+		resolveBundle(resolved, resolvedBundles, b, true);
 	}
-	private static void resolveBundle(ArrayList<String> resolved, Bundle b, boolean includeFragments) throws IOException {
+	private static void resolveBundle(Collection<String> resolved, Set<String> resolvedBundles, Bundle b, boolean includeFragments) throws IOException, BundleException {
 		if(b!=null) {
+			if(resolvedBundles.contains(b.getSymbolicName())) {
+				return;
+			}
+			
 			File f = FileLocator.getBundleFile(b);
 			
 			// If it is a directory, then look inside
@@ -129,7 +141,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 					if(StringUtil.isEmpty(cp)) {
 						continue;
 					}
-				    File cpPath = new File(f,cp);
+				    File cpPath = ".".equals(cp) ? f : new File(f,cp);
 				    if(cpPath.exists()) {
 				    	//resolveFile(resolved, path);
 				        String path = cpPath.toURI().toString();
@@ -138,15 +150,6 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 				        }
 				        resolved.add(path);
 				    }
-				}
-				// Add the fragments separately as this needs a full File path
-				if(includeFragments) {
-			    	Bundle[] fragments = Platform.getFragments(b);
-					if(fragments!=null) {
-						for(int i=0; i<fragments.length; i++) {
-							resolveBundle(resolved, fragments[i],false);
-						}
-					}
 				}
 			}
 			
@@ -184,14 +187,41 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 					}
 				}
 			}
+			
+			// Check the manifest for re-exported dependencies
+			String req = b.getHeaders().get("Require-Bundle");
+			if(StringUtil.isNotEmpty(req)) {
+				ManifestElement[] elements = ManifestElement.parseHeader("Require-Bundle", req);
+				for(ManifestElement element : elements) {
+					String visibility = element.getDirective("visibility");
+					if("reexport".equals(visibility)) {
+						Bundle dep = Platform.getBundle(element.getValue());
+						if(dep != null) {
+							resolveBundle(resolved, resolvedBundles, dep, true);
+						}
+					}
+				}
+			}
+
+			// Add the fragments separately as this needs a full File path
+			if(includeFragments) {
+				Bundle[] fragments = Platform.getFragments(b);
+				if(fragments!=null) {
+					for(Bundle fragment : fragments) {
+						resolveBundle(resolved, resolvedBundles, fragment, false);
+					}
+				}
+			}
+			
+			resolvedBundles.add(b.getSymbolicName());
 		}
 	}
 	
 	/**
 	 * @return the fully resolved class path for this file manager
 	 */
-	public String[] getResolvedClassPath() {
-		return resolvedClassPath;
+	public Collection<String> getResolvedClassPath() {
+		return Collections.unmodifiableCollection(resolvedClassPath);
 	}
     
     private static Collection<String> getBundleClassPath(Bundle b, boolean includeFragments) {
@@ -319,62 +349,65 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 			return javaFiles;
 		}
 	}
+	
+	private List<JavaFileObjectClass> classPathClasses;
 
-	private void listPackage(List<JavaFileObject> list, String packageName) throws IOException {
-		String packagePath=StringUtil.replace(packageName, '.', '/');
-		if(resolvedClassPath!=null) {
-			for(int i=0; i<resolvedClassPath.length; i++) {
-				String path = resolvedClassPath[i];
-				if(path.startsWith("jar:")) {
-					URL url = new URL(path+"!/"+packagePath);
-					listPackageFromJarFile(list, packageName, url);
-				} else {
-					URL url = new URL(path+"/"+packagePath);
-					File directory = new File(url.getFile());
-					listPackageFromDirectory(list, packageName, directory);
-				}
-			}
-		}
-	}
-
-	private void listPackageFromDirectory(List<JavaFileObject> list, String packageName, File directory) throws IOException {
-		File[] files=directory.listFiles();
-		if(files!=null) {
-			for(int i=0; i<files.length; i++) {
-				File file = files[i];
-				if(file.isFile()) {
-					String cName=file.getName();
-					if(cName.endsWith(JavaSourceClassLoader.CLASS_EXTENSION)) {
-						String binaryName=packageName+"."+removeClassExtension(cName);
-						list.add(new JavaFileObjectClass(file.toURI(), binaryName));
+	private synchronized void listPackage(List<JavaFileObject> list, String packageName) throws IOException {
+		try {
+			if(classPathClasses == null) {
+				classPathClasses = new ArrayList<>();
+				if(resolvedClassPath != null) {
+					for(String path : resolvedClassPath) {
+						if(path.startsWith("jar:")) {
+							URL url = new URL(path + "!/");
+							listJarFile(classPathClasses, url);
+						} else {
+							Path directory = Paths.get(new URI(path));
+							listDirectory(classPathClasses, directory);
+						}
 					}
 				}
 			}
+			classPathClasses.stream()
+				.filter(o -> o.binaryName().startsWith(packageName) && o.binaryName().indexOf('.', packageName.length()+1) == -1)
+				.forEach(list::add);
+		} catch(URISyntaxException e) {
+			throw new IOException(e);
+		} catch(IOException e) {
+			throw e;
 		}
 	}
 
-	private void listPackageFromJarFile(List<JavaFileObject> list, String packageName, URL url) throws IOException {
-		try {
-			String sUrl=url.toExternalForm();
-			String jarPrefix=sUrl.substring(0,sUrl.lastIndexOf("!/")+2);
+	private void listDirectory(List<JavaFileObjectClass> list, Path directory) throws IOException {
+		Files.find(directory, Integer.MAX_VALUE,
+			(file, attr) -> 
+				attr.isRegularFile() && file.getFileName().toString().endsWith(JavaSourceClassLoader.CLASS_EXTENSION)
+			)
+			.map(path -> {
+				String binaryName = removeClassExtension(path.toString()).replace(File.separatorChar, '.');
+				return new JavaFileObjectClass(path.toUri(), binaryName);
+			})
+			.forEach(list::add);
+	}
 
-			JarURLConnection jarConn=(JarURLConnection) url.openConnection();
-			String rootEntryName=jarConn.getEntryName();
-			int rootEnd=rootEntryName.length()+1;
-
-			for( Enumeration<JarEntry> e=jarConn.getJarFile().entries(); e.hasMoreElements(); ) {
-				JarEntry entry=e.nextElement();
-				String name=entry.getName();
-				if(name.startsWith(rootEntryName) && name.indexOf('/',rootEnd)<0 && name.endsWith(JavaSourceClassLoader.CLASS_EXTENSION)) {
-					String binaryName=removeClassExtension(StringUtil.replace(name,'/', '.'));
-					URI uri = new URI(jarPrefix+name);
-					list.add(new JavaFileObjectClass(uri, binaryName));
-				}
-			}
-		} catch (URISyntaxException e) {
-			throw new IOException(StringUtil.format("Not able to open uri {0} as a jar file", url), e);
-		} catch (FileNotFoundException e) {
-			// The jar doesn't exists with this path, ignore....
+	private void listJarFile(List<JavaFileObjectClass> list, URL url) throws IOException {
+		// The jar file may not contain an entry for the package folder explicitly (e.g. Notes.jar),
+		//   so look for entries starting with it
+		JarURLConnection jarConn = (JarURLConnection)url.openConnection();
+		try(JarFile jarFile = jarConn.getJarFile()) {
+			Collections.list(jarFile.entries()).stream()
+				.map(JarEntry::getName)
+				.filter(name -> name.endsWith(JavaSourceClassLoader.CLASS_EXTENSION))
+				.map(name -> {
+					try {
+						URI uri = new URI(url + name);
+						String binaryName = removeClassExtension(StringUtil.replace(name, '/' , '.'));
+						return new JavaFileObjectClass(uri, binaryName);
+					} catch (URISyntaxException e) {
+						throw new RuntimeException("Exception while extracting class name from jar", e);
+					}
+				})
+				.forEach(list::add);
 		}
 	}
 	

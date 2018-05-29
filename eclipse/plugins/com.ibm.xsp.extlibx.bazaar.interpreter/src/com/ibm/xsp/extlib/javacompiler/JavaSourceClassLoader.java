@@ -24,7 +24,6 @@ import java.net.URLClassLoader;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -80,7 +79,7 @@ public class JavaSourceClassLoader extends ClassLoader {
 		StandardJavaFileManager standardJavaFileManager=javaCompiler.getStandardFileManager(diagnostics, null, null);
 		javaFileManager=new SourceFileManager(standardJavaFileManager, JavaSourceClassLoader.this, classPath, resolve);
 		
-		URL[] urls = Arrays.stream(javaFileManager.getResolvedClassPath())
+		URL[] urls = javaFileManager.getResolvedClassPath().stream()
 				.map(url -> {
 					try {
 						String fullUrl;
