@@ -4,7 +4,7 @@
 	<modelVersion>4.0.0</modelVersion>
 	<groupId>com.ibm.xsp.extlib.bazaar</groupId>
 	<artifactId>parent</artifactId>
-	<version>2.0.1</version>
+	<version>2.0.2-SNAPSHOT</version>
 	<packaging>pom</packaging>
 
 	<name>XPages Bazaar</name>
@@ -55,7 +55,7 @@
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-compiler-plugin</artifactId>
-				<version>3.7.0-jboss-1</version>
+				<version>3.7.0</version>
 				<configuration>
 					<source>${compiler}</source>
 					<target>${compiler}</target>
