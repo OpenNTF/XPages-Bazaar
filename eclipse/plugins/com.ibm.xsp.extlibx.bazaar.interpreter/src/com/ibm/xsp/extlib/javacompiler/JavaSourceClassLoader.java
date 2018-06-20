@@ -16,6 +16,7 @@
 package com.ibm.xsp.extlib.javacompiler;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
 import java.net.MalformedURLException;
@@ -51,7 +52,7 @@ import com.ibm.xsp.extlib.javacompiler.impl.SourceFileManager;
  * The added source files are compiled on the fly. The dependency classpath is passed
  * as a parameter.
  */
-public class JavaSourceClassLoader extends ClassLoader {
+public class JavaSourceClassLoader extends ClassLoader implements AutoCloseable {
 	
 	public static final String JAVA_EXTENSION=JavaFileObject.Kind.SOURCE.extension;
 	public static final String CLASS_EXTENSION=JavaFileObject.Kind.CLASS.extension;
@@ -226,28 +227,11 @@ public class JavaSourceClassLoader extends ClassLoader {
 		return Collections.unmodifiableCollection(classes.keySet());
 	}
 	
-/*
-    // TESTS..
-	public static void main(String[] args) {
-		try {
-			String javaSource="package mypackage;\n"+"import com.ibm.commons.util.StringUtil;\n"+"import com.ibm.commons.Platform;\n"
-					+"public class MyClass implements Runnable {\n"+"  public void run() {\n"+"    Class<?> c = StringUtil.class;\n"
-					+"    System.out.print(\"Dynamically compiled class!\"+c.toString());\n"+"  }\n"+"}\n";
-			List<String> options=null; // Arrays.asList(new String[] {"-target",
-										// "1.6" })
-			JavaSourceClassLoader cl=new JavaSourceClassLoader(JavaSourceClassLoader.class.getClassLoader(), options, null);
-			Class<?> c=cl.addClass("mypackage.MyClass", javaSource, null);
-			Runnable r=(Runnable) c.newInstance();
-			if(r!=null) {
-				r.run();
-			} else {
-				System.out.println("Compilation error");
-			}
-		} catch (Throwable e) {
-			e.printStackTrace();
-		}
+	@Override
+	public void close() throws IOException {
+		javaFileManager.close();
 	}
-*/	
+	
 	// *******************************************************************************
 	// * Internal utility methods
 	// *******************************************************************************
