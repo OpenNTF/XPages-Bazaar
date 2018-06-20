@@ -32,6 +32,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Dictionary;
 import java.util.Enumeration;
 import java.util.HashMap;
@@ -64,12 +65,13 @@ import com.ibm.xsp.extlib.javacompiler.JavaSourceClassLoader;
  * 
  * @author priand
  */
-public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager> {
+public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager> implements AutoCloseable {
 
 	private JavaSourceClassLoader classLoader;
 	private Map<URI, JavaFileObjectJavaSource> fileObjects=new HashMap<URI, JavaFileObjectJavaSource>();
 	
 	private Collection<String> resolvedClassPath;
+	private Set<Path> cleanup = new HashSet<>();
 
 	public SourceFileManager(JavaFileManager fileManager, JavaSourceClassLoader classLoader, String[] classPath, boolean resolve) {
 		super(fileManager);
@@ -81,7 +83,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 		}
 	}
 	
-	public static Collection<String> resolveClasspath(final String[] classPath) {
+	public Collection<String> resolveClasspath(final String[] classPath) {
 		Set<String> resolvedBundles = new HashSet<>();
 		return AccessController.doPrivileged((PrivilegedAction<Collection<String>>)() -> {
 				try {
@@ -106,7 +108,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 				return Collections.emptyList();
 		});
 	}
-	private static void resolveBundle(Collection<String> resolved, Set<String> resolvedBundles, String bundleName) throws IOException, BundleException {
+	private void resolveBundle(Collection<String> resolved, Set<String> resolvedBundles, String bundleName) throws IOException, BundleException {
 		if(resolvedBundles.contains(bundleName)) {
 			return;
 		}
@@ -114,7 +116,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 		Bundle b = org.eclipse.core.runtime.Platform.getBundle(bundleName);
 		resolveBundle(resolved, resolvedBundles, b, true);
 	}
-	private static void resolveBundle(Collection<String> resolved, Set<String> resolvedBundles, Bundle b, boolean includeFragments) throws IOException, BundleException {
+	private void resolveBundle(Collection<String> resolved, Set<String> resolvedBundles, Bundle b, boolean includeFragments) throws IOException, BundleException {
 		if(b!=null) {
 			if(resolvedBundles.contains(b.getSymbolicName())) {
 				return;
@@ -174,6 +176,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 						JarEntry jarEntry = jarFile.getJarEntry(cp);
 						if(jarEntry != null) {
 							File tempJar = File.createTempFile(cp.replace('/', '-'), ".jar");
+							cleanup.add(tempJar.toPath());
 							tempJar.deleteOnExit();
 							try(FileOutputStream fos = new FileOutputStream(tempJar)) {
 								try(InputStream is = jarFile.getInputStream(jarEntry)) {
@@ -347,6 +350,24 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 				javaFiles.add(file);
 			}
 			return javaFiles;
+		}
+	}
+	
+	/**
+	 * Cleans up any temporary files created during processing.
+	 */
+	@Override
+	public void close() throws IOException {
+		super.close();
+		
+		for(Path path : cleanup) {
+			if(Files.isDirectory(path)) {
+				Files.walk(path)
+				    .sorted(Comparator.reverseOrder())
+				    .map(Path::toFile)
+				    .forEach(File::delete);
+			}
+			Files.deleteIfExists(path);
 		}
 	}
 	
