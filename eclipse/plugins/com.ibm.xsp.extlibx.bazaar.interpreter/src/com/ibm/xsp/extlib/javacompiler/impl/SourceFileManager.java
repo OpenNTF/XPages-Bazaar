@@ -121,6 +121,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 			if(resolvedBundles.contains(b.getSymbolicName())) {
 				return;
 			}
+			resolvedBundles.add(b.getSymbolicName());
 			
 			File f = FileLocator.getBundleFile(b);
 			
@@ -215,8 +216,6 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 					}
 				}
 			}
-			
-			resolvedBundles.add(b.getSymbolicName());
 		}
 	}
 	
