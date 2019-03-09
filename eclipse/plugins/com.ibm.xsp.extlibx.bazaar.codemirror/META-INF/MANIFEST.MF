@@ -11,3 +11,4 @@ Export-Package: com.ibm.xsp.extlib.codemirror.component,
  com.ibm.xsp.extlib.fragment,
  com.ibm.xsp.extlib.prettify.resources,
  com.ibm.xsp.extlib.vkbeautify.resources
+Bundle-RequiredExecutionEnvironment: JavaSE-1.8
