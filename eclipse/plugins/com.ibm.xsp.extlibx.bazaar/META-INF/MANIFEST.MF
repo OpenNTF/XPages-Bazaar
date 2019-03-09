@@ -19,3 +19,4 @@ Export-Package: com.ibm.xsp.extlib.bazaar.minifier,
  com.ibm.xsp.extlib.library
 Bundle-Activator: com.ibm.xsp.extlib.library.BazaarActivator
 Bundle-ActivationPolicy: lazy
+Bundle-RequiredExecutionEnvironment: JavaSE-1.8
