@@ -77,8 +77,7 @@ public class JavaSourceClassLoader extends ClassLoader implements AutoCloseable 
 		this.javaCompiler=ToolProvider.getSystemJavaCompiler();
 		this.diagnostics=new DiagnosticCollector<JavaFileObject>();
 
-		StandardJavaFileManager standardJavaFileManager=javaCompiler.getStandardFileManager(diagnostics, null, null);
-		javaFileManager=new SourceFileManager(standardJavaFileManager, JavaSourceClassLoader.this, classPath, resolve);
+		javaFileManager = createSourceFileManager(javaCompiler, diagnostics, classPath, resolve);
 		
 		URL[] urls = javaFileManager.getResolvedClassPath().stream()
 				.map(url -> {
@@ -96,6 +95,11 @@ public class JavaSourceClassLoader extends ClassLoader implements AutoCloseable 
 				})
 				.collect(Collectors.toList()).toArray(new URL[0]);
 		this.classPathLoader = new URLClassLoader(urls);
+	}
+	
+	protected SourceFileManager createSourceFileManager(JavaCompiler javaCompiler, DiagnosticCollector<JavaFileObject> diagnostics, String[] classPath, boolean resolve) {
+		StandardJavaFileManager standardJavaFileManager=javaCompiler.getStandardFileManager(diagnostics, null, null);
+		return new SourceFileManager(standardJavaFileManager, JavaSourceClassLoader.this, classPath, resolve);
 	}
 
 	public void addCompiledFile(String qualifiedClassName, JavaFileObjectJavaCompiled classFile) {

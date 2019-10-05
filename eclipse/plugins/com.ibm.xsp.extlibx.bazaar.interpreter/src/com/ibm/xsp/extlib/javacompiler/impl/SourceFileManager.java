@@ -69,6 +69,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 
 	private JavaSourceClassLoader classLoader;
 	private Map<URI, JavaFileObjectJavaSource> fileObjects=new HashMap<URI, JavaFileObjectJavaSource>();
+	private final boolean isOsgi = StringUtil.isNotEmpty(System.getProperty("osgi.framework.version"));
 	
 	private Collection<String> resolvedClassPath;
 	private Set<Path> cleanup = new HashSet<>();
@@ -109,6 +110,9 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 		});
 	}
 	private void resolveBundle(Collection<String> resolved, Set<String> resolvedBundles, String bundleName) throws IOException, BundleException {
+		if(!isOsgi) {
+			return;
+		}
 		if(resolvedBundles.contains(bundleName)) {
 			return;
 		}
@@ -259,6 +263,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 	
 	@Override
 	public FileObject getFileForInput(Location location, String packageName, String relativeName) throws IOException {
+		System.out.println("Asking for package " + packageName + ", relativeName " + relativeName);
 		try {
 			URI uri = new URI(location.getName()+'/'+packageName+'/'+relativeName);
 			JavaFileObjectJavaSource o=fileObjects.get(uri);
@@ -372,7 +377,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 	
 	private List<JavaFileObjectClass> classPathClasses;
 
-	private synchronized void listPackage(List<JavaFileObject> list, String packageName) throws IOException {
+	protected synchronized void listPackage(List<JavaFileObject> list, String packageName) throws IOException {
 		try {
 			if(classPathClasses == null) {
 				classPathClasses = new ArrayList<>();
@@ -398,7 +403,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 		}
 	}
 
-	private void listDirectory(List<JavaFileObjectClass> list, Path directory) throws IOException {
+	protected void listDirectory(List<JavaFileObjectClass> list, Path directory) throws IOException {
 		Files.find(directory, Integer.MAX_VALUE,
 			(file, attr) -> 
 				attr.isRegularFile() && file.getFileName().toString().endsWith(JavaSourceClassLoader.CLASS_EXTENSION)
@@ -410,7 +415,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 			.forEach(list::add);
 	}
 
-	private void listJarFile(List<JavaFileObjectClass> list, URL url) throws IOException {
+	protected void listJarFile(List<JavaFileObjectClass> list, URL url) throws IOException {
 		// The jar file may not contain an entry for the package folder explicitly (e.g. Notes.jar),
 		//   so look for entries starting with it
 		JarURLConnection jarConn = (JarURLConnection)url.openConnection();
