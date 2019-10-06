@@ -263,7 +263,6 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 	
 	@Override
 	public FileObject getFileForInput(Location location, String packageName, String relativeName) throws IOException {
-		System.out.println("Asking for package " + packageName + ", relativeName " + relativeName);
 		try {
 			URI uri = new URI(location.getName()+'/'+packageName+'/'+relativeName);
 			JavaFileObjectJavaSource o=fileObjects.get(uri);
