@@ -43,6 +43,9 @@ public class ControlPassthoughTag extends Control {
 		@Override
 		public void updateProperty(SecurityManager sm, Object object) {
 			sm.checkSetProperty(object, getName(), value);
+			
+			// TODO support EL
+			
 			((UIPassThroughTag)object).addAttribute(getName(), StringUtil.toString(value));
 		}
 		
