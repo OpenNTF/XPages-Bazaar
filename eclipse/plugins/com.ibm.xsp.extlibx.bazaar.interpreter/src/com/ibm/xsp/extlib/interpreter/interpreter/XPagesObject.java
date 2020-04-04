@@ -16,9 +16,11 @@
 
 package com.ibm.xsp.extlib.interpreter.interpreter;
 
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import javax.faces.FacesException;
 import javax.faces.application.Application;
@@ -43,6 +45,7 @@ import com.ibm.xsp.registry.FacesMethodBindingProperty;
 import com.ibm.xsp.registry.FacesProperty;
 import com.ibm.xsp.registry.FacesSimpleProperty;
 import com.ibm.xsp.registry.types.FacesSimpleTypes;
+import com.ibm.xsp.util.TypedUtil;
 import com.ibm.xsp.util.ValueBindingUtil;
 
 /**
@@ -185,6 +188,67 @@ public abstract class XPagesObject {
         }
     }
 
+    //////////////////////////////////////////////////////////////
+    // Attribute map properties
+    //////////////////////////////////////////////////////////////
+    /**
+     * @author Jesse Gallagher
+     * @since 2.0.4
+     */
+    public static class AttributesSetterFactory extends SetterFactory {
+    	private final String name;
+    	
+    	public AttributesSetterFactory(String name) {
+			this.name = name;
+		}
+    	
+    	@Override
+    	public Object parseString(String value) {
+    		// Special handling for known properties
+    		switch(name) {
+    		case "disableTheme":
+    			return Boolean.parseBoolean(value);
+    		default:
+        		return value;
+    		}
+    	}
+
+		@Override
+		public String getName() {
+			return name;
+		}
+
+		@Override
+		public PropertySetter createSetter(Object value) {
+			return new AttributesSetter(name, value);
+		}
+    	
+    }
+
+    /**
+     * {@link PropertySetter} implementation that sets values on a {@link UIComponent}
+     * using its attributes map.
+     * 
+     * @author Jesse Gallagher
+     * @since 2.0.4
+     */
+    public static class AttributesSetter extends AbstractSetter {
+    	private final Object value;
+    	
+		public AttributesSetter(String name, Object value) {
+			super(name);
+			this.value = value;
+		}
+
+		@Override
+		public void updateProperty(SecurityManager sm, Object object) {
+			sm.checkSetProperty(object, getName(), value);
+			Map<String, Object> attributes = TypedUtil.getAttributes((UIComponent)object);
+			attributes.put(getName(), value);
+		}
+    	
+    }
+
     
     //////////////////////////////////////////////////////////////
     // Optimized properties
@@ -249,7 +313,15 @@ public abstract class XPagesObject {
             this.value = value;
         }
         public void updateProperty(SecurityManager sm, Object object) {
-            ((UIComponent)object).setRendered(value);
+        	try {
+	        	Method setter = object.getClass().getMethod("setRendered", boolean.class);
+	        	if(setter == null) {
+	        		throw new NullPointerException("Unable to find method setRendered on object " + object);
+	        	}
+	            setter.invoke(object, value);
+        	} catch(InvocationTargetException | NoSuchMethodException | SecurityException | IllegalAccessException | IllegalArgumentException e) {
+        		throw new RuntimeException(e);
+        	}
         }
     }    
 
@@ -290,11 +362,10 @@ public abstract class XPagesObject {
                 sm.checkSetProperty(object, getName(), o);
                 method.invoke(object, o);
             } catch(Exception e) {
-                throw new FacesExceptionEx(null,"Error while setting property {0} on object {1}",getName(),object.getClass());
+                throw new FacesExceptionEx(e,"Error while setting property {0} on object {1}",getName(),object.getClass());
             }
         }
     }
-
     
     //////////////////////////////////////////////////////////////
     // Collection
@@ -332,7 +403,7 @@ public abstract class XPagesObject {
                 sm.checkSetProperty(object, getName(), o);
                 method.invoke(object, o);
             } catch(Exception e) {
-                throw new FacesExceptionEx(null,"Error while setting property {0} on object {1}",getName(),object.getClass());
+                throw new FacesExceptionEx(e,"Error while setting property {0} on object {1}",getName(),object.getClass());
             }
         }
     }
@@ -495,7 +566,7 @@ public abstract class XPagesObject {
             super(name);
             this._this = _this;
             this.name = name;
-            this.expression = expression;
+            this.expression = ValueBindingUtil.convertLoadtimeExpression(expression);
             this.javaClass = javaClass;
         }
         public String getExpression() {
@@ -588,7 +659,7 @@ public abstract class XPagesObject {
             }
             return o;
         } catch(Exception ex) {
-            throw new FacesExceptionEx(ex,"Error while instanciating object {0}:{1} (class {2})",definition.getNamespaceUri(),definition.getTagName(),definition.getJavaClass().getName());
+            throw new FacesExceptionEx(ex,"Error while instantiating object {0}:{1} (class {2})",definition.getNamespaceUri(),definition.getTagName(),definition.getJavaClass().getName());
         }
     }
 	
@@ -636,7 +707,7 @@ public abstract class XPagesObject {
 	}
 
     public PropertySetter createSetter(String name, Object value) {
-        if(value.getClass()==String.class) {
+        if(value != null && value.getClass()==String.class) {
             return createSetterFromString(name, (String)value);
         }
         PropertySetter setter = createPropertySetter(name, value);
@@ -701,27 +772,33 @@ public abstract class XPagesObject {
     	    }
 
     	    Class<?> c = prop.getJavaClass();
+    	    Method setter = findSetter(prop, c);
+    	    
+    	    if(setter == null) {
+    	    	// Legal XSP property that must be set with attrs
+    	    	return new AttributesSetterFactory(prop.getName());
+    	    }
     	    
     	    // Complex property
     	    if(p.getType()==FacesSimpleTypes.TYPE_OBJECT) {
-                return new ComplexTypeSetterFactory(prop.getName(),findSetter(prop, c));
+                return new ComplexTypeSetterFactory(prop.getName(), setter);
     	    }
     	    
     	    // Generic setter
             if(c==Object.class) {
-                return new GenericObjectSetterFactory(prop.getName(),findSetter(prop, c));
+                return new GenericObjectSetterFactory(prop.getName(),setter);
             }
             if(c==String.class) {
-                return new GenericStringSetterFactory(prop.getName(),findSetter(prop, c));
+                return new GenericStringSetterFactory(prop.getName(),setter);
             }
             if(c==Integer.TYPE) {
-                return new GenericIntSetterFactory(prop.getName(),findSetter(prop, c));
+                return new GenericIntSetterFactory(prop.getName(),setter);
             }
             if(c==Double.TYPE) {
-                return new GenericDoubleSetterFactory(prop.getName(),findSetter(prop, c));
+                return new GenericDoubleSetterFactory(prop.getName(),setter);
             }
             if(c==Boolean.TYPE) {
-                return new GenericBooleanSetterFactory(prop.getName(),findSetter(prop, c));
+                return new GenericBooleanSetterFactory(prop.getName(),setter);
             }
             throw new FacesExceptionEx(null,"Unsupported simple property type {0} for {1}",c.getName(),prop.getName());
         }
@@ -758,6 +835,6 @@ public abstract class XPagesObject {
             String methodName = "set"+Character.toUpperCase(pName.charAt(0))+pName.substring(1);
             return definition.getJavaClass().getMethod(methodName,c);
         } catch(NoSuchMethodException ex) {}
-        throw new FacesExceptionEx(null,"Unknown setter for property {0} of class {1}",prop.getName(),c.getName());
+        return null;
     }
 }

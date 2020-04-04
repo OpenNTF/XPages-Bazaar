@@ -197,7 +197,7 @@ public class XPagesParser {
         	} else {
         		ComplexProperty complex = (ComplexProperty)xpagesObject;
         		if(context.property==null) {
-        			throw new FacesExceptionEx(null,"Complex type {0} must be added to a property",localName);
+        			throw new FacesExceptionEx(null,"Complex type {0} must be added to a property (context {1})",localName, context.object);
         		}
         		context.object.addProperty(context.property, complex);
 	        	context = new XPagesContext(context,complex); 
