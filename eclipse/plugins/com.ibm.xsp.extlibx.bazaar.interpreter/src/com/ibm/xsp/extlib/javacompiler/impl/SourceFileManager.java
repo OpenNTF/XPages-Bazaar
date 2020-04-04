@@ -283,6 +283,26 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 			throw new IllegalArgumentException(e);
 		}
 	}
+	
+	/**
+	 * Removes the source for the provided class from the file manager, if present
+	 * 
+	 * @param location the {@link StandardLocation} expected to house the class
+	 * @param qualifiedClassName the fully-qualified class name
+	 * @since 2.0.4
+	 */
+	public void purgeSourceFile(StandardLocation location, String qualifiedClassName) {
+		try {
+			int dotPos=qualifiedClassName.lastIndexOf('.');
+			String packageName=dotPos<0 ? "" : qualifiedClassName.substring(0, dotPos);
+			String className=dotPos<0 ? qualifiedClassName : qualifiedClassName.substring(dotPos+1);
+			String javaName=className+JavaSourceClassLoader.JAVA_EXTENSION;
+			URI uri = new URI(location.getName()+'/'+packageName+'/'+javaName);
+			fileObjects.remove(uri);
+		} catch (URISyntaxException e) {
+			throw new IllegalArgumentException(e);
+		}
+	}
 
 	@Override
 	public JavaFileObject getJavaFileForOutput(Location location, String qualifiedName, Kind kind, FileObject outputFile) throws IOException {

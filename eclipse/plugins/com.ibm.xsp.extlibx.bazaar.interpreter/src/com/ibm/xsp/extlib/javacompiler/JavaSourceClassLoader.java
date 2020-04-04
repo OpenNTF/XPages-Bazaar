@@ -44,6 +44,7 @@ import javax.tools.ToolProvider;
 
 import com.ibm.xsp.extlib.javacompiler.impl.JavaFileObjectJavaCompiled;
 import com.ibm.xsp.extlib.javacompiler.impl.JavaFileObjectJavaSource;
+import com.ibm.xsp.extlib.javacompiler.impl.SingletonClassLoader;
 import com.ibm.xsp.extlib.javacompiler.impl.SourceFileManager;
 
 /**
@@ -65,6 +66,7 @@ public class JavaSourceClassLoader extends ClassLoader implements AutoCloseable 
 	private PrintStream out;
 	
 	private final ClassLoader classPathLoader;
+	private final Map<String, SingletonClassLoader> classNameClassLoaders = Collections.synchronizedMap(new HashMap<>());
 
 	public JavaSourceClassLoader(ClassLoader parentClassLoader, List<String> compilerOptions, String[] classPath) {
 		this(parentClassLoader, compilerOptions, classPath, true);
@@ -110,6 +112,18 @@ public class JavaSourceClassLoader extends ClassLoader implements AutoCloseable 
 		return classes.containsKey(qualifiedClassName);
 	}
 	
+	/**
+	 * Removes the provided class from the cache of compiled classes, if present.
+	 * 
+	 * @param qualifiedClassName the class name to remove
+	 * @since 2.0.4
+	 */
+	public void purgeClass(String qualifiedClassName) {
+		classes.remove(qualifiedClassName);
+		getJavaFileManager().purgeSourceFile(StandardLocation.SOURCE_PATH, qualifiedClassName);
+		classNameClassLoaders.remove(qualifiedClassName);
+	}
+	
 	public SourceFileManager getJavaFileManager() {
 		return javaFileManager;
 	}
@@ -132,7 +146,13 @@ public class JavaSourceClassLoader extends ClassLoader implements AutoCloseable 
 		JavaFileObject file=classes.get(qualifiedClassName);
 		if(file!=null) {
 			byte[] bytes=((JavaFileObjectJavaCompiled) file).getByteCode();
-			return defineClass(qualifiedClassName, bytes, 0, bytes.length);
+			String cname = qualifiedClassName;
+			int dollarIndex = cname.indexOf('$');
+			if(dollarIndex > -1) {
+				cname = cname.substring(0, dollarIndex);
+			}
+			SingletonClassLoader delegate = classNameClassLoaders.computeIfAbsent(cname, name -> new SingletonClassLoader(this));
+			return delegate.defineClass(qualifiedClassName, bytes);
 		}
 		// http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6434149
 		try {
@@ -202,11 +222,9 @@ public class JavaSourceClassLoader extends ClassLoader implements AutoCloseable 
 				javaFileManager.addSourceFile(StandardLocation.SOURCE_PATH, packageName, javaName, source);
 			}
 		}
-		Boolean result = AccessController.doPrivileged(new PrivilegedAction<Boolean>() {
-			public Boolean run() {
-				CompilationTask task=javaCompiler.getTask(null, javaFileManager, diagnostics, options, null, sources);
-				return task.call();
-			}
+		Boolean result = AccessController.doPrivileged((PrivilegedAction<Boolean>) () -> {
+			CompilationTask task=javaCompiler.getTask(null, javaFileManager, diagnostics, options, null, sources);
+			return task.call();
 		});
 		if(result==null||!result.booleanValue()) {
 			List<Diagnostic<? extends JavaFileObject>> l=diagnostics.getDiagnostics();
