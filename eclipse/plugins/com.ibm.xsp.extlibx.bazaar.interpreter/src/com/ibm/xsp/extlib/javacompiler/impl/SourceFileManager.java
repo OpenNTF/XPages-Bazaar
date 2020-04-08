@@ -182,7 +182,6 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 						if(jarEntry != null) {
 							File tempJar = File.createTempFile(cp.replace('/', '-'), ".jar");
 							cleanup.add(tempJar.toPath());
-							tempJar.deleteOnExit();
 							try(FileOutputStream fos = new FileOutputStream(tempJar)) {
 								try(InputStream is = jarFile.getInputStream(jarEntry)) {
 									StreamUtil.copyStream(is, fos);
