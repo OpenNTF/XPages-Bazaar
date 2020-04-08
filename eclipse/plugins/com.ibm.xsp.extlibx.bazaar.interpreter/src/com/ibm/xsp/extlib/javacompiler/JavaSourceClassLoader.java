@@ -65,7 +65,7 @@ public class JavaSourceClassLoader extends ClassLoader implements AutoCloseable 
 	private SourceFileManager javaFileManager;
 	private PrintStream out;
 	
-	private final ClassLoader classPathLoader;
+	private final URLClassLoader classPathLoader;
 	private final Map<String, SingletonClassLoader> classNameClassLoaders = Collections.synchronizedMap(new HashMap<>());
 
 	public JavaSourceClassLoader(ClassLoader parentClassLoader, List<String> compilerOptions, String[] classPath) {
@@ -250,8 +250,12 @@ public class JavaSourceClassLoader extends ClassLoader implements AutoCloseable 
 	}
 	
 	@Override
-	public void close() throws IOException {
+	public void close() {
 		javaFileManager.close();
+		try {
+			classPathLoader.close();
+		} catch (IOException e) {
+		}
 	}
 	
 	// *******************************************************************************

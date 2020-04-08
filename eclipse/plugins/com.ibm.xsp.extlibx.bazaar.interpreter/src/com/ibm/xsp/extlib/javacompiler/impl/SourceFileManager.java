@@ -32,7 +32,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.Dictionary;
 import java.util.Enumeration;
 import java.util.HashMap;
@@ -389,20 +388,29 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 		
 		for(Path path : cleanup) {
 			try {
-				if(Files.isDirectory(path)) {
-					Files.walk(path)
-					    .sorted(Comparator.reverseOrder())
-					    .forEach(t -> {
-							try {
-								Files.delete(t);
-							} catch (IOException e) {
-							}
-						});
-				}
-				Files.deleteIfExists(path);
-			} catch(IOException e) {
-				// Ignore, since it'll likely be a Windows file-locking thing we can't work around
+				deltree(path);
+			} catch (IOException e) {
 			}
+		}
+	}
+	
+	public static void deltree(Path path) throws IOException {
+		if(Files.isDirectory(path)) {
+			Files.list(path)
+			    .forEach(t -> {
+					try {
+						deltree(t);
+					} catch (IOException e) {
+						throw new RuntimeException(e);
+					}
+				});
+		}
+		try {
+			Files.deleteIfExists(path);
+		} catch(IOException e) {
+			// This is likely a Windows file-locking thing. In this case,
+			//   punt and hand it off to File#deleteOnExit
+			path.toFile().deleteOnExit();
 		}
 	}
 	
