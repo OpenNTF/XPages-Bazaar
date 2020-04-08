@@ -214,6 +214,17 @@ public class DynamicXPageBean {
 		return compile(pageName, pageContent, null);
 	}
 	
+	/**
+	 * Removes the provided compiled page class from the internal cache, if present.
+	 * 
+	 * @param pageName the page to remove
+	 * @since 2.0.4
+	 */
+	public void purgeCompiledPage(String pageName) {
+		String className=PageToClassNameUtil.getClassNameForPage(pageName);
+		getJavaSourceClassLoader().purgeClass(className);
+	}
+	
 	public String translate(String className, String pageName, String pageContent, FacesSharableRegistry registry) throws Exception {
 		FacesDeserializer deserial;
 		{

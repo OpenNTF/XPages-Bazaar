@@ -16,9 +16,13 @@
 
 package com.ibm.xsp.extlib.interpreter.interpreter;
 
+import java.beans.IntrospectionException;
+import java.beans.PropertyDescriptor;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import javax.faces.FacesException;
 import javax.faces.application.Application;
@@ -30,6 +34,7 @@ import com.ibm.commons.util.StringUtil;
 import com.ibm.xsp.FacesExceptionEx;
 import com.ibm.xsp.binding.ComponentBindingObject;
 import com.ibm.xsp.binding.MethodBindingEx;
+import com.ibm.xsp.binding.PropertyMap;
 import com.ibm.xsp.binding.ValueBindingEx;
 import com.ibm.xsp.complex.ValueBindingObject;
 import com.ibm.xsp.component.UIIncludeComposite;
@@ -43,6 +48,7 @@ import com.ibm.xsp.registry.FacesMethodBindingProperty;
 import com.ibm.xsp.registry.FacesProperty;
 import com.ibm.xsp.registry.FacesSimpleProperty;
 import com.ibm.xsp.registry.types.FacesSimpleTypes;
+import com.ibm.xsp.util.TypedUtil;
 import com.ibm.xsp.util.ValueBindingUtil;
 
 /**
@@ -180,11 +186,142 @@ public abstract class XPagesObject {
                 sm.checkSetProperty(object, getName(), value);
                 method.invoke(object, value);
             } catch(Exception e) {
-                throw new FacesExceptionEx(null,"Error while setting property {0} on object {1}",getName(),object.getClass());
+                throw new FacesExceptionEx(e,"Error while setting property {0} on object {1}",getName(),object.getClass());
             }
         }
     }
 
+    //////////////////////////////////////////////////////////////
+    // Attribute map properties
+    //////////////////////////////////////////////////////////////
+    /**
+     * @author Jesse Gallagher
+     * @since 2.0.4
+     */
+    public static class AttributesSetterFactory extends SetterFactory {
+    	private final String name;
+    	
+    	public AttributesSetterFactory(String name) {
+			this.name = name;
+		}
+    	
+    	@Override
+    	public Object parseString(String value) {
+    		// Special handling for known properties
+    		switch(name) {
+    		case "disableTheme":
+    			return Boolean.parseBoolean(value);
+    		default:
+        		return value;
+    		}
+    	}
+
+		@Override
+		public String getName() {
+			return name;
+		}
+
+		@Override
+		public PropertySetter createSetter(Object value) {
+			return new AttributesSetter(name, value);
+		}
+    	
+    }
+
+    /**
+     * {@link PropertySetter} implementation that sets values on a {@link UIComponent}
+     * using its attributes map.
+     * 
+     * @author Jesse Gallagher
+     * @since 2.0.4
+     */
+    public static class AttributesSetter extends AbstractSetter {
+    	private final Object value;
+    	
+		public AttributesSetter(String name, Object value) {
+			super(name);
+			this.value = value;
+		}
+
+		@Override
+		public void updateProperty(SecurityManager sm, Object object) {
+			sm.checkSetProperty(object, getName(), value);
+			Map<String, Object> attributes = TypedUtil.getAttributes((UIComponent)object);
+			attributes.put(getName(), value);
+		}
+    	
+    }
+
+    //////////////////////////////////////////////////////////////
+    // Custom control properties
+    //////////////////////////////////////////////////////////////
+    /**
+     * @author Jesse Gallagher
+     * @since 2.0.4
+     */
+    public static class CompositePropertySetter extends AbstractSetter  {
+		private Object value;
+
+		public CompositePropertySetter(String name, Object value) {
+			super(name);
+			this.value = value;
+		}
+
+		@Override
+		public void updateProperty(SecurityManager sm, Object object) {
+			sm.checkSetProperty(object, getName(), value);
+			
+			Object setVal = value;
+			if(setVal instanceof String) {
+				if(ValueBindingUtil.isLoadtimeExpression((String)setVal)) {
+					// Then execute now and store
+					FacesContext ctx = FacesContext.getCurrentInstance();
+		            javax.faces.el.ValueBinding vb = ctx.getApplication().createValueBinding((String)setVal);
+		            sm.checkLoadtimeBinding(object, getName(), vb);
+		            setVal = vb.getValue(ctx);
+				} else if(ValueBindingUtil.isRuntimeExpression((String)setVal)) {
+					// Then create the value binding and set that
+					FacesContext ctx = FacesContext.getCurrentInstance();
+		            javax.faces.el.ValueBinding vb = ctx.getApplication().createValueBinding((String)setVal);
+		            sm.checkRuntimeBinding(object, getName(), vb);
+		            setVal = vb;
+				}
+				
+				// TODO look up composite property and coax value?
+			}
+			
+			PropertyMap propertyMap = ((UIIncludeComposite)object).getPropertyMap();
+			propertyMap.setProperty(getName(), setVal);
+		}
+	}
+	
+    /**
+     * @author Jesse Gallagher
+     * @since 2.0.4
+     */
+	private static class CompositePropertySetterFactory extends SetterFactory {
+		private final String name;
+		
+		public CompositePropertySetterFactory(String name) {
+			this.name = name;
+		}
+		
+		@Override
+		public Object parseString(String value) {
+			return value;
+		}
+
+		@Override
+		public String getName() {
+			return name;
+		}
+
+		@Override
+		public PropertySetter createSetter(Object value) {
+			return new CompositePropertySetter(name, value);
+		}
+		
+	}
     
     //////////////////////////////////////////////////////////////
     // Optimized properties
@@ -249,7 +386,15 @@ public abstract class XPagesObject {
             this.value = value;
         }
         public void updateProperty(SecurityManager sm, Object object) {
-            ((UIComponent)object).setRendered(value);
+        	try {
+	        	Method setter = object.getClass().getMethod("setRendered", boolean.class);
+	        	if(setter == null) {
+	        		throw new NullPointerException("Unable to find method setRendered on object " + object);
+	        	}
+	            setter.invoke(object, value);
+        	} catch(InvocationTargetException | NoSuchMethodException | SecurityException | IllegalAccessException | IllegalArgumentException e) {
+        		throw new RuntimeException(e);
+        	}
         }
     }    
 
@@ -290,11 +435,10 @@ public abstract class XPagesObject {
                 sm.checkSetProperty(object, getName(), o);
                 method.invoke(object, o);
             } catch(Exception e) {
-                throw new FacesExceptionEx(null,"Error while setting property {0} on object {1}",getName(),object.getClass());
+                throw new FacesExceptionEx(e,"Error while setting property {0} on object {1}",getName(),object.getClass());
             }
         }
     }
-
     
     //////////////////////////////////////////////////////////////
     // Collection
@@ -332,7 +476,7 @@ public abstract class XPagesObject {
                 sm.checkSetProperty(object, getName(), o);
                 method.invoke(object, o);
             } catch(Exception e) {
-                throw new FacesExceptionEx(null,"Error while setting property {0} on object {1}",getName(),object.getClass());
+                throw new FacesExceptionEx(e,"Error while setting property {0} on object {1}",getName(),object.getClass());
             }
         }
     }
@@ -480,6 +624,14 @@ public abstract class XPagesObject {
                 throw new FacesExceptionEx(null,"Cannot assign value binding to property {0} of object class {1}", property.getName(), object.getClass());
             }
         }
+        
+        @Override
+        public String toString() {
+        	return StringUtil.format("[{0}: expression={1}]",
+        		getClass().getSimpleName(),
+        		expression
+        	);
+        }
     }
 
     
@@ -495,7 +647,7 @@ public abstract class XPagesObject {
             super(name);
             this._this = _this;
             this.name = name;
-            this.expression = expression;
+            this.expression = ValueBindingUtil.convertLoadtimeExpression(expression);
             this.javaClass = javaClass;
         }
         public String getExpression() {
@@ -588,7 +740,7 @@ public abstract class XPagesObject {
             }
             return o;
         } catch(Exception ex) {
-            throw new FacesExceptionEx(ex,"Error while instanciating object {0}:{1} (class {2})",definition.getNamespaceUri(),definition.getTagName(),definition.getJavaClass().getName());
+            throw new FacesExceptionEx(ex,"Error while instantiating object {0}:{1} (class {2})",definition.getNamespaceUri(),definition.getTagName(),definition.getJavaClass().getName());
         }
     }
 	
@@ -616,6 +768,19 @@ public abstract class XPagesObject {
             throw new FacesExceptionEx(null,"Unknown property {0} in object id {1}", name, getFacesDefinition().getId());
         }
         
+        // Special handling for custom controls
+        // The FacesProperty we have is indistinguishable between real setter and custom property, so
+        //   we have to check first before continuing
+        if(definition instanceof FacesCompositeComponentDefinition) {
+        	try {
+				new PropertyDescriptor(name, definition.getJavaClass());
+			} catch (IntrospectionException e) {
+				// If the above doesn't work, that means it's not a real class property.
+				//   Return a custom-control setter
+				return new CompositePropertySetter(name, value);
+			}
+        }
+        
         // Check if this is a loadtime binding expressions
         if(ValueBindingUtil.isLoadtimeExpression(value)) {
             return new LoadtimeBinding(this, name, value, prop.getJavaClass());
@@ -636,7 +801,7 @@ public abstract class XPagesObject {
 	}
 
     public PropertySetter createSetter(String name, Object value) {
-        if(value.getClass()==String.class) {
+        if(value != null && value.getClass()==String.class) {
             return createSetterFromString(name, (String)value);
         }
         PropertySetter setter = createPropertySetter(name, value);
@@ -701,27 +866,38 @@ public abstract class XPagesObject {
     	    }
 
     	    Class<?> c = prop.getJavaClass();
+    	    Method setter = findSetter(prop, c);
+    	    
+    	    if(setter == null) {
+    	    	if(definition instanceof FacesCompositeComponentDefinition) {
+    	    		// Custom control property - set it via CC methods
+    	    		return new CompositePropertySetterFactory(prop.getName());
+    	    	} else {
+	    	    	// Other legal XSP property that must be set with attrs
+	    	    	return new AttributesSetterFactory(prop.getName());
+    	    	}
+    	    }
     	    
     	    // Complex property
     	    if(p.getType()==FacesSimpleTypes.TYPE_OBJECT) {
-                return new ComplexTypeSetterFactory(prop.getName(),findSetter(prop, c));
+                return new ComplexTypeSetterFactory(prop.getName(), setter);
     	    }
     	    
     	    // Generic setter
             if(c==Object.class) {
-                return new GenericObjectSetterFactory(prop.getName(),findSetter(prop, c));
+                return new GenericObjectSetterFactory(prop.getName(),setter);
             }
             if(c==String.class) {
-                return new GenericStringSetterFactory(prop.getName(),findSetter(prop, c));
+                return new GenericStringSetterFactory(prop.getName(),setter);
             }
             if(c==Integer.TYPE) {
-                return new GenericIntSetterFactory(prop.getName(),findSetter(prop, c));
+                return new GenericIntSetterFactory(prop.getName(),setter);
             }
             if(c==Double.TYPE) {
-                return new GenericDoubleSetterFactory(prop.getName(),findSetter(prop, c));
+                return new GenericDoubleSetterFactory(prop.getName(),setter);
             }
             if(c==Boolean.TYPE) {
-                return new GenericBooleanSetterFactory(prop.getName(),findSetter(prop, c));
+                return new GenericBooleanSetterFactory(prop.getName(),setter);
             }
             throw new FacesExceptionEx(null,"Unsupported simple property type {0} for {1}",c.getName(),prop.getName());
         }
@@ -754,10 +930,13 @@ public abstract class XPagesObject {
 	}
     protected Method findSetter(FacesProperty prop, Class<?> c) {
         String pName = prop.getName();
+        return findSetter(pName, c);
+    }
+    protected Method findSetter(String pName, Class<?> c) {
         try {
             String methodName = "set"+Character.toUpperCase(pName.charAt(0))+pName.substring(1);
             return definition.getJavaClass().getMethod(methodName,c);
         } catch(NoSuchMethodException ex) {}
-        throw new FacesExceptionEx(null,"Unknown setter for property {0} of class {1}",prop.getName(),c.getName());
+        return null;
     }
 }

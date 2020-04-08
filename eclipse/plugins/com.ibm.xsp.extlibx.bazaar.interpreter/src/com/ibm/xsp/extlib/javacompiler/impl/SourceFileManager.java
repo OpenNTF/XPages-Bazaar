@@ -69,6 +69,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 
 	private JavaSourceClassLoader classLoader;
 	private Map<URI, JavaFileObjectJavaSource> fileObjects=new HashMap<URI, JavaFileObjectJavaSource>();
+	private final boolean isOsgi = StringUtil.isNotEmpty(System.getProperty("osgi.framework.version"));
 	
 	private Collection<String> resolvedClassPath;
 	private Set<Path> cleanup = new HashSet<>();
@@ -109,6 +110,9 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 		});
 	}
 	private void resolveBundle(Collection<String> resolved, Set<String> resolvedBundles, String bundleName) throws IOException, BundleException {
+		if(!isOsgi) {
+			return;
+		}
 		if(resolvedBundles.contains(bundleName)) {
 			return;
 		}
@@ -279,6 +283,26 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 			throw new IllegalArgumentException(e);
 		}
 	}
+	
+	/**
+	 * Removes the source for the provided class from the file manager, if present
+	 * 
+	 * @param location the {@link StandardLocation} expected to house the class
+	 * @param qualifiedClassName the fully-qualified class name
+	 * @since 2.0.4
+	 */
+	public void purgeSourceFile(StandardLocation location, String qualifiedClassName) {
+		try {
+			int dotPos=qualifiedClassName.lastIndexOf('.');
+			String packageName=dotPos<0 ? "" : qualifiedClassName.substring(0, dotPos);
+			String className=dotPos<0 ? qualifiedClassName : qualifiedClassName.substring(dotPos+1);
+			String javaName=className+JavaSourceClassLoader.JAVA_EXTENSION;
+			URI uri = new URI(location.getName()+'/'+packageName+'/'+javaName);
+			fileObjects.remove(uri);
+		} catch (URISyntaxException e) {
+			throw new IllegalArgumentException(e);
+		}
+	}
 
 	@Override
 	public JavaFileObject getJavaFileForOutput(Location location, String qualifiedName, Kind kind, FileObject outputFile) throws IOException {
@@ -356,23 +380,35 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 	 * Cleans up any temporary files created during processing.
 	 */
 	@Override
-	public void close() throws IOException {
-		super.close();
+	public void close() {
+		try {
+			super.close();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
 		
 		for(Path path : cleanup) {
-			if(Files.isDirectory(path)) {
-				Files.walk(path)
-				    .sorted(Comparator.reverseOrder())
-				    .map(Path::toFile)
-				    .forEach(File::delete);
+			try {
+				if(Files.isDirectory(path)) {
+					Files.walk(path)
+					    .sorted(Comparator.reverseOrder())
+					    .forEach(t -> {
+							try {
+								Files.delete(t);
+							} catch (IOException e) {
+							}
+						});
+				}
+				Files.deleteIfExists(path);
+			} catch(IOException e) {
+				// Ignore, since it'll likely be a Windows file-locking thing we can't work around
 			}
-			Files.deleteIfExists(path);
 		}
 	}
 	
 	private List<JavaFileObjectClass> classPathClasses;
 
-	private synchronized void listPackage(List<JavaFileObject> list, String packageName) throws IOException {
+	protected synchronized void listPackage(List<JavaFileObject> list, String packageName) throws IOException {
 		try {
 			if(classPathClasses == null) {
 				classPathClasses = new ArrayList<>();
@@ -398,7 +434,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 		}
 	}
 
-	private void listDirectory(List<JavaFileObjectClass> list, Path directory) throws IOException {
+	protected void listDirectory(List<JavaFileObjectClass> list, Path directory) throws IOException {
 		Files.find(directory, Integer.MAX_VALUE,
 			(file, attr) -> 
 				attr.isRegularFile() && file.getFileName().toString().endsWith(JavaSourceClassLoader.CLASS_EXTENSION)
@@ -410,7 +446,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 			.forEach(list::add);
 	}
 
-	private void listJarFile(List<JavaFileObjectClass> list, URL url) throws IOException {
+	protected void listJarFile(List<JavaFileObjectClass> list, URL url) throws IOException {
 		// The jar file may not contain an entry for the package folder explicitly (e.g. Notes.jar),
 		//   so look for entries starting with it
 		JarURLConnection jarConn = (JarURLConnection)url.openConnection();
