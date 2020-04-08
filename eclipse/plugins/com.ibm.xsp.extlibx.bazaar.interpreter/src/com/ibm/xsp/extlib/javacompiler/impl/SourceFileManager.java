@@ -380,17 +380,29 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 	 * Cleans up any temporary files created during processing.
 	 */
 	@Override
-	public void close() throws IOException {
-		super.close();
+	public void close() {
+		try {
+			super.close();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
 		
 		for(Path path : cleanup) {
-			if(Files.isDirectory(path)) {
-				Files.walk(path)
-				    .sorted(Comparator.reverseOrder())
-				    .map(Path::toFile)
-				    .forEach(File::delete);
+			try {
+				if(Files.isDirectory(path)) {
+					Files.walk(path)
+					    .sorted(Comparator.reverseOrder())
+					    .forEach(t -> {
+							try {
+								Files.delete(t);
+							} catch (IOException e) {
+							}
+						});
+				}
+				Files.deleteIfExists(path);
+			} catch(IOException e) {
+				// Ignore, since it'll likely be a Windows file-locking thing we can't work around
 			}
-			Files.deleteIfExists(path);
 		}
 	}
 	
