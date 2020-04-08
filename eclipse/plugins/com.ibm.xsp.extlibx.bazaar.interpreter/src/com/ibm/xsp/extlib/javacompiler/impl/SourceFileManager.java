@@ -69,7 +69,8 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 
 	private JavaSourceClassLoader classLoader;
 	private Map<URI, JavaFileObjectJavaSource> fileObjects=new HashMap<URI, JavaFileObjectJavaSource>();
-	private final boolean isOsgi = StringUtil.isNotEmpty(System.getProperty("osgi.framework.version"));
+	private final boolean isOsgi = StringUtil.isNotEmpty(System.getProperty("osgi.framework.vendor"))
+	                               || StringUtil.isNotEmpty(System.getProperty("org.osgi.framework.vendor"));
 	
 	private Collection<String> resolvedClassPath;
 	private Set<Path> cleanup = new HashSet<>();
@@ -87,26 +88,26 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 	public Collection<String> resolveClasspath(final String[] classPath) {
 		Set<String> resolvedBundles = new HashSet<>();
 		return AccessController.doPrivileged((PrivilegedAction<Collection<String>>)() -> {
-				try {
-					if(classPath!=null) {
-						List<String> resolved = new ArrayList<String>();
-						for(String cp : classPath) {
-							// Known protocols
-							if(cp.startsWith("file:") || cp.startsWith("jar:")) {
-								resolved.add(cp);
-							} else {
-								// Resolve a simple bundle to its URL
-								resolveBundle(resolved, resolvedBundles, cp);
-							}
-						}
-						if(resolved.size()>0) {
-							return resolved;
+			try {
+				if(classPath!=null) {
+					List<String> resolved = new ArrayList<String>();
+					for(String cp : classPath) {
+						// Known protocols
+						if(cp.startsWith("file:") || cp.startsWith("jar:")) {
+							resolved.add(cp);
+						} else {
+							// Resolve a simple bundle to its URL
+							resolveBundle(resolved, resolvedBundles, cp);
 						}
 					}
-				} catch(IOException | BundleException ex) {
-					ex.printStackTrace();
+					if(resolved.size()>0) {
+						return resolved;
+					}
 				}
-				return Collections.emptyList();
+			} catch(IOException | BundleException ex) {
+				ex.printStackTrace();
+			}
+			return Collections.emptyList();
 		});
 	}
 	private void resolveBundle(Collection<String> resolved, Set<String> resolvedBundles, String bundleName) throws IOException, BundleException {
