@@ -65,8 +65,9 @@ public class JavaSourceClassLoader extends ClassLoader implements AutoCloseable 
 	private SourceFileManager javaFileManager;
 	private PrintStream out;
 	
-	private final ClassLoader classPathLoader;
+	private final URLClassLoader classPathLoader;
 	private final Map<String, SingletonClassLoader> classNameClassLoaders = Collections.synchronizedMap(new HashMap<>());
+	private boolean useSingletonClassLoaders = false;
 
 	public JavaSourceClassLoader(ClassLoader parentClassLoader, List<String> compilerOptions, String[] classPath) {
 		this(parentClassLoader, compilerOptions, classPath, true);
@@ -146,13 +147,17 @@ public class JavaSourceClassLoader extends ClassLoader implements AutoCloseable 
 		JavaFileObject file=classes.get(qualifiedClassName);
 		if(file!=null) {
 			byte[] bytes=((JavaFileObjectJavaCompiled) file).getByteCode();
-			String cname = qualifiedClassName;
-			int dollarIndex = cname.indexOf('$');
-			if(dollarIndex > -1) {
-				cname = cname.substring(0, dollarIndex);
+			if(useSingletonClassLoaders) {
+				String cname = qualifiedClassName;
+				int dollarIndex = cname.indexOf('$');
+				if(dollarIndex > -1) {
+					cname = cname.substring(0, dollarIndex);
+				}
+				SingletonClassLoader delegate = classNameClassLoaders.computeIfAbsent(cname, name -> new SingletonClassLoader(this));
+				return delegate.defineClass(qualifiedClassName, bytes);
+			} else {
+				return defineClass(qualifiedClassName, bytes, 0, bytes.length);
 			}
-			SingletonClassLoader delegate = classNameClassLoaders.computeIfAbsent(cname, name -> new SingletonClassLoader(this));
-			return delegate.defineClass(qualifiedClassName, bytes);
 		}
 		// http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6434149
 		try {
@@ -249,9 +254,25 @@ public class JavaSourceClassLoader extends ClassLoader implements AutoCloseable 
 		return Collections.unmodifiableCollection(classes.keySet());
 	}
 	
+	/**
+	 * Sets whether to use per-class classloaders. This isolates each class and any inner classes into an individual
+	 * classloader, which allows for dynamic discarding of compiled classes. Set this to {@code false} (the default)
+	 * to keep all classes within the same classloader.
+	 * 
+	 * @param useSingletonClassLoaders whether to use per-class classloaders
+	 * @since 2.0.5
+	 */
+	public void setUseSingletonClassLoaders(boolean useSingletonClassLoaders) {
+		this.useSingletonClassLoaders = useSingletonClassLoaders;
+	}
+	
 	@Override
-	public void close() throws IOException {
+	public void close() {
 		javaFileManager.close();
+		try {
+			classPathLoader.close();
+		} catch (IOException e) {
+		}
 	}
 	
 	// *******************************************************************************
