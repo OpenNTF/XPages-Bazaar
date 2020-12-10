@@ -59,6 +59,7 @@ public class JavaSourceClassLoader extends ClassLoader implements AutoCloseable 
 	public static final String CLASS_EXTENSION=JavaFileObject.Kind.CLASS.extension;
 
 	private Map<String, JavaFileObjectJavaCompiled> classes;
+	private Map<String, Class<?>> definedClasses = new HashMap<>();
 	private JavaCompiler javaCompiler;
 	private List<String> options;
 	private DiagnosticCollector<JavaFileObject> diagnostics;
@@ -146,22 +147,24 @@ public class JavaSourceClassLoader extends ClassLoader implements AutoCloseable 
 		// Look if the class had already been compiled
 		JavaFileObject file=classes.get(qualifiedClassName);
 		if(file!=null) {
-			byte[] bytes=((JavaFileObjectJavaCompiled) file).getByteCode();
-			if(useSingletonClassLoaders) {
-				String cname = qualifiedClassName;
-				int dollarIndex = cname.indexOf('$');
-				if(dollarIndex > -1) {
-					cname = cname.substring(0, dollarIndex);
+			return definedClasses.computeIfAbsent(qualifiedClassName, className -> {
+				byte[] bytes=((JavaFileObjectJavaCompiled) file).getByteCode();
+				if(useSingletonClassLoaders) {
+					String cname = qualifiedClassName;
+					int dollarIndex = cname.indexOf('$');
+					if(dollarIndex > -1) {
+						cname = cname.substring(0, dollarIndex);
+					}
+					SingletonClassLoader delegate = classNameClassLoaders.computeIfAbsent(cname, name -> new SingletonClassLoader(this));
+					return delegate.defineClass(qualifiedClassName, bytes);
+				} else {
+					return defineClass(qualifiedClassName, bytes, 0, bytes.length);
 				}
-				SingletonClassLoader delegate = classNameClassLoaders.computeIfAbsent(cname, name -> new SingletonClassLoader(this));
-				return delegate.defineClass(qualifiedClassName, bytes);
-			} else {
-				return defineClass(qualifiedClassName, bytes, 0, bytes.length);
-			}
+			});
 		}
 		// http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6434149
 		try {
-			Class<?> c=Class.forName(qualifiedClassName);
+			Class<?> c=Class.forName(qualifiedClassName, true, getParent());
 			return c;
 		} catch (ClassNotFoundException nf) {
 		}
