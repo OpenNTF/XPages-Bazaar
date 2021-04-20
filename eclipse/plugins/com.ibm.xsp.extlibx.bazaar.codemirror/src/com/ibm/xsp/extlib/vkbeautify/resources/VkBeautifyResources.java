@@ -1,5 +1,5 @@
 /*
- * © Copyright IBM Corp. 2010
+ * ï¿½ Copyright IBM Corp. 2010
  * 
  * Licensed under the Apache License, Version 2.0 (the "License"); 
  * you may not use this file except in compliance with the License. 
@@ -26,6 +26,6 @@ import com.ibm.xsp.resource.DojoModuleResource;
  */
 public class VkBeautifyResources {
 
-    public static final DojoModuleResource dojoVkBeautify = new DojoModuleResource("extlib.vkbeautify.vkbeautify"); // $NON-NLS-1$
+    public static final DojoModuleResource dojoVkBeautify = new DojoModuleResource("extlib.vkbeautify.vkbeautify"); //$NON-NLS-1$
    
 }
