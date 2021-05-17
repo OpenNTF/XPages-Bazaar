@@ -73,6 +73,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 	
 	private Collection<String> resolvedClassPath;
 	private Set<Path> cleanup = new HashSet<>();
+	private Collection<String> nonDelegatingPackages;
 
 	public SourceFileManager(JavaFileManager fileManager, JavaSourceClassLoader classLoader, String[] classPath, boolean resolve) {
 		super(fileManager);
@@ -354,12 +355,16 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 		// Particular case for the servlet classes
 		if(location==StandardLocation.PLATFORM_CLASS_PATH) {
 			if(kinds.contains(JavaFileObject.Kind.CLASS)) {
-				// java.* must come from the SystemClassLoader, so no reason to look
-				// from our ClassLoader
 				if(packageName.startsWith("javax.servlet")) {
 					listPackage(javaFiles,packageName);
 					return javaFiles;
 				}
+			}
+		}
+		
+		if(this.nonDelegatingPackages != null) {
+			if(this.nonDelegatingPackages.stream().anyMatch(p -> packageName.equals(p) || packageName.startsWith(p+"."))) {
+				return javaFiles;
 			}
 		}
 
@@ -372,6 +377,24 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 				javaFiles.add(file);
 			}
 			return javaFiles;
+		}
+	}
+	
+	/**
+	 * Sets a collection of package prefixes to skip root classloader delegation for. When
+	 * packages match this collection, only the configured classpath from the constructor
+	 * will be consulted.
+	 * 
+	 * @param nonDelegatingPackages a {@link Collection} of full or partial package names
+	 *      to skip delegation for, or {@code null} to unset
+	 * 
+	 * @since 2.0.7
+	 */
+	public void setNonDelegatingPackages(Collection<String> nonDelegatingPackages) {
+		if(nonDelegatingPackages == null) {
+			this.nonDelegatingPackages = null;
+		} else {
+			this.nonDelegatingPackages = new HashSet<>(nonDelegatingPackages);
 		}
 	}
 	
