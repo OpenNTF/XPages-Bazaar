@@ -471,7 +471,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 				attr.isRegularFile() && file.getFileName().toString().endsWith(JavaSourceClassLoader.CLASS_EXTENSION)
 			)
 			.map(path -> {
-				String binaryName = removeClassExtension(path.toString()).replace(File.separatorChar, '.');
+				String binaryName = removeClassExtension(path.toString()).replace(directory.getFileSystem().getSeparator(), ".");
 				return new JavaFileObjectClass(path.toUri(), binaryName);
 			})
 			.forEach(list::add);
