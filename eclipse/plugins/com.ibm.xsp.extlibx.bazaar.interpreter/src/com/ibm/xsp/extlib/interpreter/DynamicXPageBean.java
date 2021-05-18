@@ -16,10 +16,11 @@
 
 package com.ibm.xsp.extlib.interpreter;
 
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.io.PrintWriter;
-import java.io.StringReader;
 import java.io.StringWriter;
+import java.nio.charset.StandardCharsets;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.HashMap;
@@ -30,7 +31,6 @@ import javax.faces.context.FacesContext;
 
 import com.ibm.commons.util.AbstractException;
 import com.ibm.commons.util.StringUtil;
-import com.ibm.commons.util.io.ReaderInputStream;
 import com.ibm.jscript.std.ErrorObject;
 import com.ibm.xsp.application.ApplicationEx;
 import com.ibm.xsp.application.ViewHandlerEx;
@@ -226,7 +226,7 @@ public class DynamicXPageBean {
 	}
 	
 	public String translate(String className, String pageName, String pageContent, FacesSharableRegistry registry) throws Exception {
-		try(InputStream in=new ReaderInputStream(new StringReader(pageContent))) {
+		try(InputStream in = new ByteArrayInputStream(pageContent.getBytes(StandardCharsets.UTF_8))) {
 			return translate(className, pageName, in, registry);
 		}
 	}
