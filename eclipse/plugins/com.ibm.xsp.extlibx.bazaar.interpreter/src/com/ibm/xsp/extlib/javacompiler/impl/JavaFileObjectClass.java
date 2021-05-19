@@ -22,6 +22,8 @@ import java.io.OutputStream;
 import java.io.Reader;
 import java.io.Writer;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collection;
 
@@ -73,7 +75,7 @@ public class JavaFileObjectClass implements JavaFileObject, Closeable {
 
 	@Override
 	public InputStream openInputStream() throws IOException {
-		InputStream is = uri.toURL().openStream();
+		InputStream is = Files.newInputStream(Paths.get(uri));
 		this.openedStreams.add(is);
 		return is;
 	}

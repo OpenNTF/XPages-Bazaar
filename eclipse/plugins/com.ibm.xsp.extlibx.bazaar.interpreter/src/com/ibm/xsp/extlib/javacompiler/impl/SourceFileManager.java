@@ -17,14 +17,17 @@ package com.ibm.xsp.extlib.javacompiler.impl;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.net.URI;
-import java.net.URISyntaxException;
-import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.ArrayList;
@@ -41,6 +44,8 @@ import java.util.Set;
 import java.util.jar.JarEntry;
 import java.util.jar.JarInputStream;
 import java.util.stream.Stream;
+import java.util.zip.Deflater;
+import java.util.zip.ZipOutputStream;
 
 import javax.tools.FileObject;
 import javax.tools.ForwardingJavaFileManager;
@@ -75,6 +80,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 	private Collection<String> nonDelegatingPackages;
 	
 	private List<JavaFileObjectClass> classPathClasses;
+	private Map<Path, FileSystem> jarFileSystems = new HashMap<>();
 
 	public SourceFileManager(JavaFileManager fileManager, JavaSourceClassLoader classLoader, String[] classPath, boolean resolve) {
 		super(fileManager);
@@ -86,7 +92,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 		}
 	}
 	
-	public Collection<String> resolveClasspath(final String[] classPath) {
+	protected Collection<String> resolveClasspath(final String[] classPath) {
 		Set<String> resolvedBundles = new HashSet<>();
 		return AccessController.doPrivileged((PrivilegedAction<Collection<String>>)() -> {
 			try {
@@ -266,25 +272,17 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 	
 	@Override
 	public FileObject getFileForInput(Location location, String packageName, String relativeName) throws IOException {
-		try {
-			URI uri = new URI(location.getName()+'/'+packageName+'/'+relativeName);
-			JavaFileObjectJavaSource o=fileObjects.get(uri);
-			if(o!=null) {
-				return o;
-			}
-		} catch (URISyntaxException e) {
-			throw new IllegalArgumentException(e);
+		URI uri = URI.create(location.getName()+'/'+packageName+'/'+relativeName);
+		JavaFileObjectJavaSource o=fileObjects.get(uri);
+		if(o!=null) {
+			return o;
 		}
 		return super.getFileForInput(location, packageName, relativeName);
 	}
 
 	public void addSourceFile(StandardLocation location, String packageName, String relativeName, JavaFileObjectJavaSource file) {
-		try {
-			URI uri = new URI(location.getName()+'/'+packageName+'/'+relativeName);
-			fileObjects.put(uri, file);
-		} catch (URISyntaxException e) {
-			throw new IllegalArgumentException(e);
-		}
+		URI uri = URI.create(location.getName()+'/'+packageName+'/'+relativeName);
+		fileObjects.put(uri, file);
 	}
 	
 	/**
@@ -295,16 +293,12 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 	 * @since 2.0.4
 	 */
 	public void purgeSourceFile(StandardLocation location, String qualifiedClassName) {
-		try {
-			int dotPos=qualifiedClassName.lastIndexOf('.');
-			String packageName=dotPos<0 ? "" : qualifiedClassName.substring(0, dotPos);
-			String className=dotPos<0 ? qualifiedClassName : qualifiedClassName.substring(dotPos+1);
-			String javaName=className+JavaSourceClassLoader.JAVA_EXTENSION;
-			URI uri = new URI(location.getName()+'/'+packageName+'/'+javaName);
-			fileObjects.remove(uri);
-		} catch (URISyntaxException e) {
-			throw new IllegalArgumentException(e);
-		}
+		int dotPos=qualifiedClassName.lastIndexOf('.');
+		String packageName=dotPos<0 ? "" : qualifiedClassName.substring(0, dotPos);
+		String className=dotPos<0 ? qualifiedClassName : qualifiedClassName.substring(dotPos+1);
+		String javaName=className+JavaSourceClassLoader.JAVA_EXTENSION;
+		URI uri = URI.create(location.getName()+'/'+packageName+'/'+javaName);
+		fileObjects.remove(uri);
 	}
 
 	@Override
@@ -413,6 +407,12 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 		}
 		
 		this.classPathClasses.forEach(JavaFileObjectClass::close);
+		this.jarFileSystems.forEach((p, fs) -> {
+			try {
+				fs.close();
+			} catch (IOException e) {
+			}
+		});
 		
 		for(Path path : cleanup) {
 			try {
@@ -449,10 +449,10 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 				if(resolvedClassPath != null) {
 					for(String path : resolvedClassPath) {
 						if(path.startsWith("jar:")) {
-							URL url = new URL(path.substring("jar:".length()));
-							listJarFile(classPathClasses, url);
+							URI uri = URI.create(path.substring("jar:".length()));
+							listJarFile(classPathClasses, Paths.get(uri));
 						} else {
-							Path directory = Paths.get(new URI(path));
+							Path directory = Paths.get(URI.create(path));
 							listDirectory(classPathClasses, directory);
 						}
 					}
@@ -461,8 +461,6 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 			classPathClasses.stream()
 				.filter(o -> o.binaryName().startsWith(packageName) && o.binaryName().indexOf('.', packageName.length()+1) == -1)
 				.forEach(list::add);
-		} catch(URISyntaxException e) {
-			throw new IOException(e);
 		} catch(IOException e) {
 			throw e;
 		}
@@ -484,33 +482,54 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 
 	/**
 	 * @param list the result collection to add to
-	 * @param url a URL pointing to a JAR file, e.g. "file:///foo.jar"
+	 * @param a path pointing to the JAR file to process
 	 * @throws IOException if there is a problem reading from the JAR
 	 */
-	protected void listJarFile(List<JavaFileObjectClass> list, URL url) throws IOException {
-		// The jar file may not contain an entry for the package folder explicitly (e.g. Notes.jar),
-		//   so look for entries starting with it
-		try(InputStream is = url.openStream()) {
-			try(JarInputStream jis = new JarInputStream(is)) {
-				JarEntry entry;
-				while((entry = jis.getNextJarEntry()) != null) {
-					String name = entry.getName();
-					if(name.endsWith(JavaSourceClassLoader.CLASS_EXTENSION)) {
-						try {
-							String jarUrl = "jar:" + url + "!/";
-							URI uri = new URI(jarUrl + name);
-							String binaryName = removeClassExtension(StringUtil.replace(name, '/' , '.'));
-							list.add(new JavaFileObjectClass(uri, binaryName));
-						} catch (URISyntaxException e) {
-							throw new RuntimeException("Exception while extracting class name from jar", e);
-						}
-					}
-				}
-			}
+	protected void listJarFile(List<JavaFileObjectClass> list, Path jarFile) throws IOException {
+		FileSystem fs = jarFileSystems.computeIfAbsent(jarFile, SourceFileManager::openZipPath);
+		Path jarRoot = fs.getPath("/");
+		try(Stream<Path> jarStream = Files.walk(jarRoot)) {
+			jarStream
+				.filter(Files::isRegularFile)
+				.filter(p -> p.getFileName().toString().endsWith(JavaSourceClassLoader.CLASS_EXTENSION))
+				.forEach(p -> {
+					String relativeName = jarRoot.relativize(p).toString();
+					String binaryName = removeClassExtension(relativeName.replace(fs.getSeparator(), "."));
+					list.add(new JavaFileObjectClass(p.toUri(), binaryName));
+				});
 		}
 	}
 	
 	private static String removeClassExtension(String s) {
 		return s.substring(0, s.length()-JavaSourceClassLoader.CLASS_EXTENSION.length());
+	}
+	
+	/**
+	 * Creates an NIO {@link FileSystem} reference for the contents of the provided ZIP file.
+	 * 
+	 * @param zipFilePath a {@link Path} to the ZIP file
+	 * @return a {@link FileSystem} object representing the contents of the ZIP
+	 * @throws UncheckedIOException if there is a problem creating the path
+	 * @since 2.0.7
+	 */
+	public static FileSystem openZipPath(Path zipFilePath) {
+		try {
+			// Create the ZIP file if it doesn't exist already
+			if(!Files.exists(zipFilePath) || Files.size(zipFilePath) == 0) {
+				try(OutputStream fos = Files.newOutputStream(zipFilePath, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+					try(ZipOutputStream zos = new ZipOutputStream(fos, StandardCharsets.UTF_8)) {
+						zos.setLevel(Deflater.BEST_COMPRESSION);
+					}
+				}
+			}
+			
+			URI uri = URI.create("jar:" + zipFilePath.toUri()); //$NON-NLS-1$
+			Map<String, String> env = new HashMap<>();
+			env.put("create", "true"); //$NON-NLS-1$ //$NON-NLS-2$
+			env.put("encoding", "UTF-8"); //$NON-NLS-1$ //$NON-NLS-2$
+			return FileSystems.newFileSystem(uri, env);
+		} catch(IOException e) {
+			throw new UncheckedIOException(e);
+		}
 	}
 }
