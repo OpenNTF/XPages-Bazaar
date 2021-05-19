@@ -31,7 +31,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.stream.Collectors;
 
 import javax.tools.Diagnostic;
 import javax.tools.DiagnosticCollector;
@@ -84,20 +83,20 @@ public class JavaSourceClassLoader extends ClassLoader implements AutoCloseable 
 		javaFileManager = createSourceFileManager(javaCompiler, diagnostics, classPath, resolve);
 		
 		URL[] urls = javaFileManager.getResolvedClassPath().stream()
-				.map(url -> {
-					try {
-						String fullUrl;
-						if(!url.contains("!/")) {
-							fullUrl = url + "!/";
-						} else {
-							fullUrl = url;
-						}
-						return new URL(fullUrl);
-					} catch (MalformedURLException e) {
-						throw new RuntimeException(e);
+			.map(url -> {
+				try {
+					String fullUrl;
+					if(!url.contains("!/")) {
+						fullUrl = url + "!/";
+					} else {
+						fullUrl = url;
 					}
-				})
-				.collect(Collectors.toList()).toArray(new URL[0]);
+					return new URL(fullUrl);
+				} catch (MalformedURLException e) {
+					throw new RuntimeException(e);
+				}
+			})
+			.toArray(URL[]::new);
 		this.classPathLoader = new URLClassLoader(urls);
 	}
 	
@@ -271,10 +270,13 @@ public class JavaSourceClassLoader extends ClassLoader implements AutoCloseable 
 	
 	@Override
 	public void close() {
-		javaFileManager.close();
 		try {
 			classPathLoader.close();
 		} catch (IOException e) {
+		}
+		try {
+			javaFileManager.close();
+		} catch(Exception e) {
 		}
 	}
 	
