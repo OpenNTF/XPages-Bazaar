@@ -23,7 +23,7 @@ import java.io.Reader;
 import java.io.Writer;
 import java.net.URI;
 import java.nio.file.Files;
-import java.nio.file.Paths;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 
@@ -40,18 +40,15 @@ import com.ibm.commons.util.io.StreamUtil;
  */
 public class JavaFileObjectClass implements JavaFileObject, Closeable {
 
-	private URI uri;
+	private Path path;
 	private String binaryName;
 	private String name;
 	private Collection<InputStream> openedStreams = new ArrayList<>();
 
-	public JavaFileObjectClass(URI uri, String binaryName) {
-		this.uri=uri;
+	public JavaFileObjectClass(Path path, String binaryName) {
+		this.path = path;
 		this.binaryName=binaryName;
-		this.name=uri.getPath();
-		if(this.name==null) {
-			this.name=uri.getSchemeSpecificPart();
-		}
+		this.name = path.toString();
 	}
 
 	public String binaryName() {
@@ -70,12 +67,12 @@ public class JavaFileObjectClass implements JavaFileObject, Closeable {
 
 	@Override
 	public URI toUri() {
-		return uri;
+		return path.toUri();
 	}
 
 	@Override
 	public InputStream openInputStream() throws IOException {
-		InputStream is = Files.newInputStream(Paths.get(uri));
+		InputStream is = Files.newInputStream(path);
 		this.openedStreams.add(is);
 		return is;
 	}

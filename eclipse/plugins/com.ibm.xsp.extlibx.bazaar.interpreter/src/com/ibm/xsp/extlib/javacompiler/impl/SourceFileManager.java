@@ -474,7 +474,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 			
 			dirStream.map(path -> {
 				String binaryName = removeClassExtension(path.toString()).replace(directory.getFileSystem().getSeparator(), ".");
-				return new JavaFileObjectClass(path.toUri(), binaryName);
+				return new JavaFileObjectClass(path, binaryName);
 			})
 			.forEach(list::add);
 		}	
@@ -495,7 +495,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 				.forEach(p -> {
 					String relativeName = jarRoot.relativize(p).toString();
 					String binaryName = removeClassExtension(relativeName.replace(fs.getSeparator(), "."));
-					list.add(new JavaFileObjectClass(p.toUri(), binaryName));
+					list.add(new JavaFileObjectClass(p, binaryName));
 				});
 		}
 	}
