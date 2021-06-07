@@ -13,7 +13,8 @@ Export-Package: com.ibm.xsp.extlib.fragment,
  com.ibm.xsp.extlib.interpreter.interpreter.parser,
  com.ibm.xsp.extlib.interpreter.renderkit.html_extended,
  com.ibm.xsp.extlib.javacompiler,
- com.ibm.xsp.extlib.javacompiler.impl
+ com.ibm.xsp.extlib.javacompiler.impl,
+ com.ibm.xsp.extlib.javacompiler.util
 Bundle-ClassPath: .
 Require-Bundle: com.ibm.pvc.servlet.jsp
 Bundle-RequiredExecutionEnvironment: JavaSE-1.8

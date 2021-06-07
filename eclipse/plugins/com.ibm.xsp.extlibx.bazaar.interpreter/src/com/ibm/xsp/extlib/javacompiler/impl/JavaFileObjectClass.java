@@ -22,7 +22,6 @@ import java.io.OutputStream;
 import java.io.Reader;
 import java.io.Writer;
 import java.net.URI;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -32,6 +31,7 @@ import javax.lang.model.element.NestingKind;
 import javax.tools.JavaFileObject;
 
 import com.ibm.commons.util.io.StreamUtil;
+import com.ibm.xsp.extlib.javacompiler.util.BazaarCompilerUtil;
 
 /**
  * JavaFileObject loaded from a class.
@@ -72,7 +72,7 @@ public class JavaFileObjectClass implements JavaFileObject, Closeable {
 
 	@Override
 	public InputStream openInputStream() throws IOException {
-		InputStream is = Files.newInputStream(path);
+		InputStream is = BazaarCompilerUtil.newInputStream(path);
 		this.openedStreams.add(is);
 		return is;
 	}

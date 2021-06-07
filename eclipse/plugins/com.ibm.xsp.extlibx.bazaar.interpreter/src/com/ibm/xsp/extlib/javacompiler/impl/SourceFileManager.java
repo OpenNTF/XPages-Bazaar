@@ -62,6 +62,7 @@ import org.osgi.framework.BundleException;
 
 import com.ibm.commons.util.StringUtil;
 import com.ibm.xsp.extlib.javacompiler.JavaSourceClassLoader;
+import com.ibm.xsp.extlib.javacompiler.util.BazaarCompilerUtil;
 
 /**
  * A JavaFileManager for Java source and classes consumed by the compiler.
@@ -185,7 +186,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 					
 					// Then extract to a temporary directory
 					// Note: b.getResource(cp) doesn't seem to work with dynamically-installed plugins
-					try(InputStream is = Files.newInputStream(f)) {
+					try(InputStream is = BazaarCompilerUtil.newInputStream(f)) {
 						try(JarInputStream jis = new JarInputStream(is)) {
 							JarEntry jarEntry;
 							while((jarEntry = jis.getNextJarEntry()) != null) {
