@@ -24,16 +24,12 @@
 		<tycho-version>1.7.0</tycho-version>
 		<compiler>1.8</compiler>
 	</properties>
-	
-	<prerequisites>
-		<maven>3.0.1</maven>
-	</prerequisites>
 
 	<repositories>
 		<repository>
-			<id>Luna</id>
+			<id>Neon</id>
 			<layout>p2</layout>
-			<url>https://download.eclipse.org/releases/luna/</url>
+			<url>https://download.eclipse.org/releases/neon/</url>
 		</repository>
 		<repository>
 			<id>notes</id>
