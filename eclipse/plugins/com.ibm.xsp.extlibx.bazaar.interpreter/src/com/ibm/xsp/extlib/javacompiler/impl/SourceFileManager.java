@@ -17,17 +17,15 @@ package com.ibm.xsp.extlib.javacompiler.impl;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystem;
+import java.nio.file.FileSystemNotFoundException;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
-import java.nio.file.StandardOpenOption;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.ArrayList;
@@ -44,8 +42,6 @@ import java.util.Set;
 import java.util.jar.JarEntry;
 import java.util.jar.JarInputStream;
 import java.util.stream.Stream;
-import java.util.zip.Deflater;
-import java.util.zip.ZipOutputStream;
 
 import javax.tools.FileObject;
 import javax.tools.ForwardingJavaFileManager;
@@ -61,8 +57,8 @@ import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleException;
 
 import com.ibm.commons.util.StringUtil;
+import com.ibm.xsp.extlib.bazaar.BazaarUtil;
 import com.ibm.xsp.extlib.javacompiler.JavaSourceClassLoader;
-import com.ibm.xsp.extlib.javacompiler.util.BazaarCompilerUtil;
 
 /**
  * A JavaFileManager for Java source and classes consumed by the compiler.
@@ -186,7 +182,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 					
 					// Then extract to a temporary directory
 					// Note: b.getResource(cp) doesn't seem to work with dynamically-installed plugins
-					try(InputStream is = BazaarCompilerUtil.newInputStream(f)) {
+					try(InputStream is = BazaarUtil.newInputStream(f)) {
 						try(JarInputStream jis = new JarInputStream(is)) {
 							JarEntry jarEntry;
 							while((jarEntry = jis.getNextJarEntry()) != null) {
@@ -487,7 +483,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 	 * @throws IOException if there is a problem reading from the JAR
 	 */
 	protected void listJarFile(List<JavaFileObjectClass> list, Path jarFile) throws IOException {
-		FileSystem fs = jarFileSystems.computeIfAbsent(jarFile, SourceFileManager::openZipPath);
+		FileSystem fs = getJarFileSystem(jarFile);
 		Path jarRoot = fs.getPath("/");
 		try(Stream<Path> jarStream = Files.walk(jarRoot)) {
 			jarStream
@@ -505,32 +501,18 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 		return s.substring(0, s.length()-JavaSourceClassLoader.CLASS_EXTENSION.length());
 	}
 	
-	/**
-	 * Creates an NIO {@link FileSystem} reference for the contents of the provided ZIP file.
-	 * 
-	 * @param zipFilePath a {@link Path} to the ZIP file
-	 * @return a {@link FileSystem} object representing the contents of the ZIP
-	 * @throws UncheckedIOException if there is a problem creating the path
-	 * @since 2.0.7
-	 */
-	public static FileSystem openZipPath(Path zipFilePath) {
+	private FileSystem getJarFileSystem(Path jarFile) {
+		// If we opened it locally, just return that
+		if(jarFileSystems.containsKey(jarFile)) {
+			return jarFileSystems.get(jarFile);
+		}
 		try {
-			// Create the ZIP file if it doesn't exist already
-			if(!Files.exists(zipFilePath) || Files.size(zipFilePath) == 0) {
-				try(OutputStream fos = Files.newOutputStream(zipFilePath, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
-					try(ZipOutputStream zos = new ZipOutputStream(fos, StandardCharsets.UTF_8)) {
-						zos.setLevel(Deflater.BEST_COMPRESSION);
-					}
-				}
-			}
-			
-			URI uri = URI.create("jar:" + zipFilePath.toUri()); //$NON-NLS-1$
-			Map<String, String> env = new HashMap<>();
-			env.put("create", "true"); //$NON-NLS-1$ //$NON-NLS-2$
-			env.put("encoding", "UTF-8"); //$NON-NLS-1$ //$NON-NLS-2$
-			return FileSystems.newFileSystem(uri, env);
-		} catch(IOException e) {
-			throw new UncheckedIOException(e);
+			// Next, see if it was opened elsewhere and can be reused
+			URI uri = URI.create("jar:" + jarFile.toUri()); //$NON-NLS-1$
+			return FileSystems.getFileSystem(uri);
+		} catch(FileSystemNotFoundException e) {
+			// Failing that, open it anew and stash the ref locally
+			return jarFileSystems.computeIfAbsent(jarFile, BazaarUtil::openZipPath);
 		}
 	}
 }

@@ -31,7 +31,7 @@ import javax.lang.model.element.NestingKind;
 import javax.tools.JavaFileObject;
 
 import com.ibm.commons.util.io.StreamUtil;
-import com.ibm.xsp.extlib.javacompiler.util.BazaarCompilerUtil;
+import com.ibm.xsp.extlib.bazaar.BazaarUtil;
 
 /**
  * JavaFileObject loaded from a class.
@@ -72,7 +72,7 @@ public class JavaFileObjectClass implements JavaFileObject, Closeable {
 
 	@Override
 	public InputStream openInputStream() throws IOException {
-		InputStream is = BazaarCompilerUtil.newInputStream(path);
+		InputStream is = BazaarUtil.newInputStream(path);
 		this.openedStreams.add(is);
 		return is;
 	}
