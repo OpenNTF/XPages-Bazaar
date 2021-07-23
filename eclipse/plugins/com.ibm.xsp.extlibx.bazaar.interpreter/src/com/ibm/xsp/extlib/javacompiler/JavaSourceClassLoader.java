@@ -271,12 +271,12 @@ public class JavaSourceClassLoader extends ClassLoader implements AutoCloseable 
 	@Override
 	public void close() {
 		try {
-			classPathLoader.close();
-		} catch (IOException e) {
-		}
-		try {
 			javaFileManager.close();
 		} catch(Exception e) {
+		}
+		try {
+			classPathLoader.close();
+		} catch (IOException e) {
 		}
 	}
 	
