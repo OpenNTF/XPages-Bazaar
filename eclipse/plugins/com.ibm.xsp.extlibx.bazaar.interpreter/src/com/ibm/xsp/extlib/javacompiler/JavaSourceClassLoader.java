@@ -30,6 +30,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Map.Entry;
 
 import javax.tools.Diagnostic;
@@ -77,7 +78,7 @@ public class JavaSourceClassLoader extends ClassLoader implements AutoCloseable 
 		this.classes=new HashMap<String, JavaFileObjectJavaCompiled>();
 		this.options=compilerOptions;
 		//this.javaCompiler=new EclipseCompiler();
-		this.javaCompiler=ToolProvider.getSystemJavaCompiler();
+		this.javaCompiler = Objects.requireNonNull(ToolProvider.getSystemJavaCompiler(), "Unable to create Java compiler");
 		this.diagnostics=new DiagnosticCollector<JavaFileObject>();
 
 		javaFileManager = createSourceFileManager(javaCompiler, diagnostics, classPath, resolve);
