@@ -1,5 +1,5 @@
 /*
- * © Copyright IBM Corp. 2013
+ * ï¿½ Copyright IBM Corp. 2013
  * 
  * Licensed under the Apache License, Version 2.0 (the "License"); 
  * you may not use this file except in compliance with the License. 
@@ -15,35 +15,40 @@
  */
 package com.ibm.xsp.extlib.javacompiler.impl;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.Reader;
 import java.io.Writer;
 import java.net.URI;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collection;
 
 import javax.lang.model.element.Modifier;
 import javax.lang.model.element.NestingKind;
 import javax.tools.JavaFileObject;
+
+import com.ibm.commons.util.io.StreamUtil;
+import com.ibm.xsp.extlib.bazaar.BazaarUtil;
 
 /**
  * JavaFileObject loaded from a class.
  * 
  * @author priand
  */
-public class JavaFileObjectClass implements JavaFileObject {
+public class JavaFileObjectClass implements JavaFileObject, Closeable {
 
-	private URI uri;
+	private Path path;
 	private String binaryName;
 	private String name;
+	private Collection<InputStream> openedStreams = new ArrayList<>();
 
-	public JavaFileObjectClass(URI uri, String binaryName) {
-		this.uri=uri;
+	public JavaFileObjectClass(Path path, String binaryName) {
+		this.path = path;
 		this.binaryName=binaryName;
-		this.name=uri.getPath();
-		if(this.name==null) {
-			this.name=uri.getSchemeSpecificPart();
-		}
+		this.name = path.toString();
 	}
 
 	public String binaryName() {
@@ -62,12 +67,20 @@ public class JavaFileObjectClass implements JavaFileObject {
 
 	@Override
 	public URI toUri() {
-		return uri;
+		return path.toUri();
 	}
 
 	@Override
 	public InputStream openInputStream() throws IOException {
-		return uri.toURL().openStream();
+		InputStream is = BazaarUtil.newInputStream(path);
+		this.openedStreams.add(is);
+		return is;
+	}
+	
+	@Override
+	public void close() {
+		this.openedStreams.forEach(StreamUtil::close);
+		this.openedStreams.clear();
 	}
 	
 	@Override

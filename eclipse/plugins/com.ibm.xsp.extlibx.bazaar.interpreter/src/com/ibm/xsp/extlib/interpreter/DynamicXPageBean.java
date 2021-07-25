@@ -16,10 +16,11 @@
 
 package com.ibm.xsp.extlib.interpreter;
 
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.io.PrintWriter;
-import java.io.StringReader;
 import java.io.StringWriter;
+import java.nio.charset.StandardCharsets;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.HashMap;
@@ -30,7 +31,6 @@ import javax.faces.context.FacesContext;
 
 import com.ibm.commons.util.AbstractException;
 import com.ibm.commons.util.StringUtil;
-import com.ibm.commons.util.io.ReaderInputStream;
 import com.ibm.jscript.std.ErrorObject;
 import com.ibm.xsp.application.ApplicationEx;
 import com.ibm.xsp.application.ViewHandlerEx;
@@ -226,6 +226,23 @@ public class DynamicXPageBean {
 	}
 	
 	public String translate(String className, String pageName, String pageContent, FacesSharableRegistry registry) throws Exception {
+		try(InputStream in = new ByteArrayInputStream(pageContent.getBytes(StandardCharsets.UTF_8))) {
+			return translate(className, pageName, in, registry);
+		}
+	}
+	
+	/**
+	 * Translates the provided XSP page content into Java source.
+	 * 
+	 * @param className the desired class name
+	 * @param pageName the name of the XPage or Custom Control
+	 * @param pageContent an {@link InputStream} representing the raw content
+	 * @param registry the {@link FacesSharableRegistry} to use during translation
+	 * @return the Java source for the XSP markup
+	 * @throws Exception if there is a problem translating the content
+	 * @since 2.0.7
+	 */
+	public String translate(String className, String pageName, InputStream pageContent, FacesSharableRegistry registry) throws Exception {
 		FacesDeserializer deserial;
 		{
 			Map<String, Object> options=new HashMap<String, Object>();
@@ -235,14 +252,8 @@ public class DynamicXPageBean {
 			deserial=new FacesDeserializer(registry, options);
 		}
 
-		InputStream in=new ReaderInputStream(new StringReader(pageContent));
-		ComponentElement root;
-		try {
-			FacesReader reader=new FacesReader(in);
-			root=deserial.readRoot(reader);
-		} finally {
-			in.close();
-		}
+		FacesReader reader = new FacesReader(pageContent);
+		ComponentElement root = deserial.readRoot(reader);
 
 		// Ok, we generate the XPages source code
 		Map<String, Object> options=new HashMap<String, Object>();

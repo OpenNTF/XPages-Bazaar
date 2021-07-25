@@ -15,17 +15,17 @@
  */
 package com.ibm.xsp.extlib.javacompiler.impl;
 
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.JarURLConnection;
+import java.io.UncheckedIOException;
 import java.net.URI;
-import java.net.URISyntaxException;
-import java.net.URL;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystemNotFoundException;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.ArrayList;
@@ -40,7 +40,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.jar.JarEntry;
-import java.util.jar.JarFile;
+import java.util.jar.JarInputStream;
+import java.util.stream.Stream;
 
 import javax.tools.FileObject;
 import javax.tools.ForwardingJavaFileManager;
@@ -56,7 +57,7 @@ import org.osgi.framework.Bundle;
 import org.osgi.framework.BundleException;
 
 import com.ibm.commons.util.StringUtil;
-import com.ibm.commons.util.io.StreamUtil;
+import com.ibm.xsp.extlib.bazaar.BazaarUtil;
 import com.ibm.xsp.extlib.javacompiler.JavaSourceClassLoader;
 
 /**
@@ -73,6 +74,10 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 	
 	private Collection<String> resolvedClassPath;
 	private Set<Path> cleanup = new HashSet<>();
+	private Collection<String> nonDelegatingPackages;
+	
+	private List<JavaFileObjectClass> classPathClasses;
+	private Map<Path, FileSystem> jarFileSystems = new HashMap<>();
 
 	public SourceFileManager(JavaFileManager fileManager, JavaSourceClassLoader classLoader, String[] classPath, boolean resolve) {
 		super(fileManager);
@@ -84,7 +89,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 		}
 	}
 	
-	public Collection<String> resolveClasspath(final String[] classPath) {
+	protected Collection<String> resolveClasspath(final String[] classPath) {
 		Set<String> resolvedBundles = new HashSet<>();
 		return AccessController.doPrivileged((PrivilegedAction<Collection<String>>)() -> {
 			try {
@@ -127,20 +132,20 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 			}
 			resolvedBundles.add(b.getSymbolicName());
 			
-			File f = FileLocator.getBundleFile(b);
+			Path f = FileLocator.getBundleFile(b).toPath();
 			
 			// If it is a directory, then look inside
-			if(f.isDirectory()) {
+			if(Files.isDirectory(f)) {
 				// In dev mode, we have a bin/ directory that is not reflected in the Bundle-classpath
 				// So we hard code it here
-				File fbin = new File(f,"bin");
-				if(fbin.exists() && fbin.isDirectory()) {
-			        String path = fbin.toURI().toString();
+				Path fbin = f.resolve("bin");
+				if(Files.isDirectory(fbin)) {
+			        String path = fbin.toUri().toString();
 			        resolved.add(path);
 				}
-				File fmaven = new File(f,"target/classes");
-				if(fmaven.exists() && fmaven.isDirectory()) {
-			        String path = fmaven.toURI().toString();
+				Path fmaven = f.resolve("target").resolve("classes");
+				if(Files.isDirectory(fmaven)) {
+			        String path = fmaven.toUri().toString();
 			        resolved.add(path);
 				}
 				Collection<String> classPath = getBundleClassPath(b,false);
@@ -148,10 +153,10 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 					if(StringUtil.isEmpty(cp)) {
 						continue;
 					}
-				    File cpPath = ".".equals(cp) ? f : new File(f,cp);
-				    if(cpPath.exists()) {
+				    Path cpPath = ".".equals(cp) ? f : f.resolve(cp);
+				    if(Files.exists(cpPath)) {
 				    	//resolveFile(resolved, path);
-				        String path = cpPath.toURI().toString();
+				        String path = cpPath.toUri().toString();
 				        if(path.endsWith(".jar")) {
 				            path = "jar:"+path;
 				        }
@@ -161,7 +166,7 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 			}
 			
 			// If it is a file, treat it as a jar file
-			if(f.isFile()) {
+			if(Files.isRegularFile(f)) {
 				Collection<String> classPath = getBundleClassPath(b,includeFragments);
 				// Make sure that this jar file is added, as this is not in Bundle-classpath when it is empty
 				classPath.add(".");
@@ -170,26 +175,28 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 						continue;
 					}
 					if(cp.equals(".")) {
-			            String path = "jar:"+f.toURI().toString();
+			            String path = "jar:"+f.toUri().toString();
 			            resolved.add(path);
 			            continue;
 					}
 					
 					// Then extract to a temporary directory
 					// Note: b.getResource(cp) doesn't seem to work with dynamically-installed plugins
-					try(JarFile jarFile = new JarFile(f)) {
-						JarEntry jarEntry = jarFile.getJarEntry(cp);
-						if(jarEntry != null) {
-							File tempJar = File.createTempFile(cp.replace('/', '-'), ".jar");
-							cleanup.add(tempJar.toPath());
-							try(FileOutputStream fos = new FileOutputStream(tempJar)) {
-								try(InputStream is = jarFile.getInputStream(jarEntry)) {
-									StreamUtil.copyStream(is, fos);
+					try(InputStream is = BazaarUtil.newInputStream(f)) {
+						try(JarInputStream jis = new JarInputStream(is)) {
+							JarEntry jarEntry;
+							while((jarEntry = jis.getNextJarEntry()) != null) {
+								if(cp.equals(jarEntry.getName())) {
+									Path tempJar = Files.createTempFile(cp.replace('/', '-'), ".jar");
+									cleanup.add(tempJar);
+									Files.copy(jis, tempJar, StandardCopyOption.REPLACE_EXISTING);
+									String fileUri = tempJar.toUri().toString();
+									String url = "jar:" + fileUri;
+									resolved.add(url);
+									
+									break;
 								}
 							}
-							String fileUri = tempJar.toURI().toString();
-							String url = "jar:" + fileUri;
-							resolved.add(url);
 						}
 					}
 				}
@@ -262,25 +269,17 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 	
 	@Override
 	public FileObject getFileForInput(Location location, String packageName, String relativeName) throws IOException {
-		try {
-			URI uri = new URI(location.getName()+'/'+packageName+'/'+relativeName);
-			JavaFileObjectJavaSource o=fileObjects.get(uri);
-			if(o!=null) {
-				return o;
-			}
-		} catch (URISyntaxException e) {
-			throw new IllegalArgumentException(e);
+		URI uri = URI.create(location.getName()+'/'+packageName+'/'+relativeName);
+		JavaFileObjectJavaSource o=fileObjects.get(uri);
+		if(o!=null) {
+			return o;
 		}
 		return super.getFileForInput(location, packageName, relativeName);
 	}
 
 	public void addSourceFile(StandardLocation location, String packageName, String relativeName, JavaFileObjectJavaSource file) {
-		try {
-			URI uri = new URI(location.getName()+'/'+packageName+'/'+relativeName);
-			fileObjects.put(uri, file);
-		} catch (URISyntaxException e) {
-			throw new IllegalArgumentException(e);
-		}
+		URI uri = URI.create(location.getName()+'/'+packageName+'/'+relativeName);
+		fileObjects.put(uri, file);
 	}
 	
 	/**
@@ -291,16 +290,12 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 	 * @since 2.0.4
 	 */
 	public void purgeSourceFile(StandardLocation location, String qualifiedClassName) {
-		try {
-			int dotPos=qualifiedClassName.lastIndexOf('.');
-			String packageName=dotPos<0 ? "" : qualifiedClassName.substring(0, dotPos);
-			String className=dotPos<0 ? qualifiedClassName : qualifiedClassName.substring(dotPos+1);
-			String javaName=className+JavaSourceClassLoader.JAVA_EXTENSION;
-			URI uri = new URI(location.getName()+'/'+packageName+'/'+javaName);
-			fileObjects.remove(uri);
-		} catch (URISyntaxException e) {
-			throw new IllegalArgumentException(e);
-		}
+		int dotPos=qualifiedClassName.lastIndexOf('.');
+		String packageName=dotPos<0 ? "" : qualifiedClassName.substring(0, dotPos);
+		String className=dotPos<0 ? qualifiedClassName : qualifiedClassName.substring(dotPos+1);
+		String javaName=className+JavaSourceClassLoader.JAVA_EXTENSION;
+		URI uri = URI.create(location.getName()+'/'+packageName+'/'+javaName);
+		fileObjects.remove(uri);
 	}
 
 	@Override
@@ -354,12 +349,16 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 		// Particular case for the servlet classes
 		if(location==StandardLocation.PLATFORM_CLASS_PATH) {
 			if(kinds.contains(JavaFileObject.Kind.CLASS)) {
-				// java.* must come from the SystemClassLoader, so no reason to look
-				// from our ClassLoader
 				if(packageName.startsWith("javax.servlet")) {
 					listPackage(javaFiles,packageName);
 					return javaFiles;
 				}
+			}
+		}
+		
+		if(this.nonDelegatingPackages != null) {
+			if(this.nonDelegatingPackages.stream().anyMatch(p -> packageName.equals(p) || packageName.startsWith(p+"."))) {
+				return javaFiles;
 			}
 		}
 
@@ -376,6 +375,24 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 	}
 	
 	/**
+	 * Sets a collection of package prefixes to skip root classloader delegation for. When
+	 * packages match this collection, only the configured classpath from the constructor
+	 * will be consulted.
+	 * 
+	 * @param nonDelegatingPackages a {@link Collection} of full or partial package names
+	 *      to skip delegation for, or {@code null} to unset
+	 * 
+	 * @since 2.0.7
+	 */
+	public void setNonDelegatingPackages(Collection<String> nonDelegatingPackages) {
+		if(nonDelegatingPackages == null) {
+			this.nonDelegatingPackages = null;
+		} else {
+			this.nonDelegatingPackages = new HashSet<>(nonDelegatingPackages);
+		}
+	}
+	
+	/**
 	 * Cleans up any temporary files created during processing.
 	 */
 	@Override
@@ -385,6 +402,14 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
+		
+		this.classPathClasses.forEach(JavaFileObjectClass::close);
+		this.jarFileSystems.forEach((p, fs) -> {
+			try {
+				fs.close();
+			} catch (IOException e) {
+			}
+		});
 		
 		for(Path path : cleanup) {
 			try {
@@ -396,25 +421,23 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 	
 	public static void deltree(Path path) throws IOException {
 		if(Files.isDirectory(path)) {
-			Files.list(path)
-			    .forEach(t -> {
+			try(Stream<Path> walk = Files.list(path)) {
+				walk.forEach(p -> {
 					try {
-						deltree(t);
-					} catch (IOException e) {
-						throw new RuntimeException(e);
+						deltree(p);
+					} catch(IOException e) {
+						throw new UncheckedIOException(e);
 					}
 				});
+			}
 		}
 		try {
 			Files.deleteIfExists(path);
 		} catch(IOException e) {
-			// This is likely a Windows file-locking thing. In this case,
-			//   punt and hand it off to File#deleteOnExit
-			path.toFile().deleteOnExit();
+			// This is likely a Windows file-locking thing
+			e.printStackTrace();
 		}
 	}
-	
-	private List<JavaFileObjectClass> classPathClasses;
 
 	protected synchronized void listPackage(List<JavaFileObject> list, String packageName) throws IOException {
 		try {
@@ -423,10 +446,10 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 				if(resolvedClassPath != null) {
 					for(String path : resolvedClassPath) {
 						if(path.startsWith("jar:")) {
-							URL url = new URL(path + "!/");
-							listJarFile(classPathClasses, url);
+							URI uri = URI.create(path.substring("jar:".length()));
+							listJarFile(classPathClasses, Paths.get(uri));
 						} else {
-							Path directory = Paths.get(new URI(path));
+							Path directory = Paths.get(URI.create(path));
 							listDirectory(classPathClasses, directory);
 						}
 					}
@@ -435,47 +458,61 @@ public class SourceFileManager extends ForwardingJavaFileManager<JavaFileManager
 			classPathClasses.stream()
 				.filter(o -> o.binaryName().startsWith(packageName) && o.binaryName().indexOf('.', packageName.length()+1) == -1)
 				.forEach(list::add);
-		} catch(URISyntaxException e) {
-			throw new IOException(e);
 		} catch(IOException e) {
 			throw e;
 		}
 	}
 
 	protected void listDirectory(List<JavaFileObjectClass> list, Path directory) throws IOException {
-		Files.find(directory, Integer.MAX_VALUE,
+		try(Stream<Path> dirStream = Files.find(directory, Integer.MAX_VALUE,
 			(file, attr) -> 
 				attr.isRegularFile() && file.getFileName().toString().endsWith(JavaSourceClassLoader.CLASS_EXTENSION)
-			)
-			.map(path -> {
-				String binaryName = removeClassExtension(path.toString()).replace(File.separatorChar, '.');
-				return new JavaFileObjectClass(path.toUri(), binaryName);
+			)) {
+			
+			dirStream.map(path -> {
+				String binaryName = removeClassExtension(path.toString()).replace(directory.getFileSystem().getSeparator(), ".");
+				return new JavaFileObjectClass(path, binaryName);
 			})
 			.forEach(list::add);
+		}	
 	}
 
-	protected void listJarFile(List<JavaFileObjectClass> list, URL url) throws IOException {
-		// The jar file may not contain an entry for the package folder explicitly (e.g. Notes.jar),
-		//   so look for entries starting with it
-		JarURLConnection jarConn = (JarURLConnection)url.openConnection();
-		try(JarFile jarFile = jarConn.getJarFile()) {
-			Collections.list(jarFile.entries()).stream()
-				.map(JarEntry::getName)
-				.filter(name -> name.endsWith(JavaSourceClassLoader.CLASS_EXTENSION))
-				.map(name -> {
-					try {
-						URI uri = new URI(url + name);
-						String binaryName = removeClassExtension(StringUtil.replace(name, '/' , '.'));
-						return new JavaFileObjectClass(uri, binaryName);
-					} catch (URISyntaxException e) {
-						throw new RuntimeException("Exception while extracting class name from jar", e);
-					}
-				})
-				.forEach(list::add);
+	/**
+	 * @param list the result collection to add to
+	 * @param a path pointing to the JAR file to process
+	 * @throws IOException if there is a problem reading from the JAR
+	 */
+	protected void listJarFile(List<JavaFileObjectClass> list, Path jarFile) throws IOException {
+		FileSystem fs = getJarFileSystem(jarFile);
+		Path jarRoot = fs.getPath("/");
+		try(Stream<Path> jarStream = Files.walk(jarRoot)) {
+			jarStream
+				.filter(Files::isRegularFile)
+				.filter(p -> p.getFileName().toString().endsWith(JavaSourceClassLoader.CLASS_EXTENSION))
+				.forEach(p -> {
+					String relativeName = jarRoot.relativize(p).toString();
+					String binaryName = removeClassExtension(relativeName.replace(fs.getSeparator(), "."));
+					list.add(new JavaFileObjectClass(p, binaryName));
+				});
 		}
 	}
 	
 	private static String removeClassExtension(String s) {
 		return s.substring(0, s.length()-JavaSourceClassLoader.CLASS_EXTENSION.length());
+	}
+	
+	private FileSystem getJarFileSystem(Path jarFile) {
+		// If we opened it locally, just return that
+		if(jarFileSystems.containsKey(jarFile)) {
+			return jarFileSystems.get(jarFile);
+		}
+		try {
+			// Next, see if it was opened elsewhere and can be reused
+			URI uri = URI.create("jar:" + jarFile.toUri()); //$NON-NLS-1$
+			return FileSystems.getFileSystem(uri);
+		} catch(FileSystemNotFoundException e) {
+			// Failing that, open it anew and stash the ref locally
+			return jarFileSystems.computeIfAbsent(jarFile, BazaarUtil::openZipPath);
+		}
 	}
 }

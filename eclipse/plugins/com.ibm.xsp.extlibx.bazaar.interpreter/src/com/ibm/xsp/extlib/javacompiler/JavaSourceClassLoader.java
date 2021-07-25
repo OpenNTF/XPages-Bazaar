@@ -30,8 +30,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Map.Entry;
-import java.util.stream.Collectors;
 
 import javax.tools.Diagnostic;
 import javax.tools.DiagnosticCollector;
@@ -78,26 +78,26 @@ public class JavaSourceClassLoader extends ClassLoader implements AutoCloseable 
 		this.classes=new HashMap<String, JavaFileObjectJavaCompiled>();
 		this.options=compilerOptions;
 		//this.javaCompiler=new EclipseCompiler();
-		this.javaCompiler=ToolProvider.getSystemJavaCompiler();
+		this.javaCompiler = Objects.requireNonNull(ToolProvider.getSystemJavaCompiler(), "Unable to create Java compiler");
 		this.diagnostics=new DiagnosticCollector<JavaFileObject>();
 
 		javaFileManager = createSourceFileManager(javaCompiler, diagnostics, classPath, resolve);
 		
 		URL[] urls = javaFileManager.getResolvedClassPath().stream()
-				.map(url -> {
-					try {
-						String fullUrl;
-						if(!url.contains("!/")) {
-							fullUrl = url + "!/";
-						} else {
-							fullUrl = url;
-						}
-						return new URL(fullUrl);
-					} catch (MalformedURLException e) {
-						throw new RuntimeException(e);
+			.map(url -> {
+				try {
+					String fullUrl;
+					if(!url.contains("!/")) {
+						fullUrl = url + "!/";
+					} else {
+						fullUrl = url;
 					}
-				})
-				.collect(Collectors.toList()).toArray(new URL[0]);
+					return new URL(fullUrl);
+				} catch (MalformedURLException e) {
+					throw new RuntimeException(e);
+				}
+			})
+			.toArray(URL[]::new);
 		this.classPathLoader = new URLClassLoader(urls);
 	}
 	
@@ -271,7 +271,10 @@ public class JavaSourceClassLoader extends ClassLoader implements AutoCloseable 
 	
 	@Override
 	public void close() {
-		javaFileManager.close();
+		try {
+			javaFileManager.close();
+		} catch(Exception e) {
+		}
 		try {
 			classPathLoader.close();
 		} catch (IOException e) {
