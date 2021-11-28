@@ -98,7 +98,7 @@ public class JavaSourceClassLoader extends ClassLoader implements AutoCloseable 
 				}
 			})
 			.toArray(URL[]::new);
-		this.classPathLoader = new URLClassLoader(urls);
+		this.classPathLoader = new URLClassLoader(urls, parentClassLoader);
 	}
 	
 	protected SourceFileManager createSourceFileManager(JavaCompiler javaCompiler, DiagnosticCollector<JavaFileObject> diagnostics, String[] classPath, boolean resolve) {
