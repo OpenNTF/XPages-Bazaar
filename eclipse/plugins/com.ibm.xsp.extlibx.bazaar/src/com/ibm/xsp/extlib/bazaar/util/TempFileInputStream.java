@@ -1,8 +1,9 @@
-package com.ibm.xsp.extlib.javacompiler.util;
+package com.ibm.xsp.extlib.bazaar.util;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.nio.file.OpenOption;
 import java.nio.file.Path;
 
 /**
@@ -15,9 +16,9 @@ public class TempFileInputStream extends InputStream {
 	private Path tmpFile;
     private InputStream inputStream;
     
-    public TempFileInputStream(Path tmpFile) throws IOException {
+    public TempFileInputStream(Path tmpFile, OpenOption... options) throws IOException {
     	this.tmpFile = tmpFile;
-        this.inputStream = Files.newInputStream(tmpFile);
+        this.inputStream = Files.newInputStream(tmpFile, options);
     }
 
     @Override
