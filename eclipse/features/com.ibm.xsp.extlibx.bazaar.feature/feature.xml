@@ -2,7 +2,7 @@
 <feature
       id="com.ibm.xsp.extlibx.bazaar.feature"
       label="XPages Bazaar Feature"
-      version="2.0.8.qualifier">
+      version="2.0.9.qualifier">
 
    <description url="https://www.openntf.org/main.nsf/project.xsp?r=project/XPages%20Bazaar">
       [Enter Feature Description here.]

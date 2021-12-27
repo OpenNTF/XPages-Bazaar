@@ -9,3 +9,5 @@ target/
 .factorypath
 
 .DS_Store
+
+*.versionsBackup

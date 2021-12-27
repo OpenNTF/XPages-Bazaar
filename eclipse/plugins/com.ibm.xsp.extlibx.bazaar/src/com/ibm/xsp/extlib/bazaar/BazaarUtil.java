@@ -19,6 +19,8 @@ import java.util.Objects;
 import java.util.zip.Deflater;
 import java.util.zip.ZipOutputStream;
 
+import com.ibm.xsp.extlib.bazaar.util.TempFileInputStream;
+
 /**
  * Utility methods shared by compiler classes.
  * 
@@ -49,7 +51,7 @@ public enum BazaarUtil {
 			// In practice, Files.copy in ZIP FS copies the file properly, while Files.newInputStream adds nulls
 			Path tempFile = Files.createTempFile(BazaarUtil.class.getSimpleName(), ".bin"); //$NON-NLS-1$
 			Files.copy(path, tempFile, StandardCopyOption.REPLACE_EXISTING);
-			return Files.newInputStream(tempFile, options);
+			return new TempFileInputStream(tempFile, options);
 		} else {
 			// Otherwise, just use the normal method
 			return Files.newInputStream(path, options);
